@@ -27,6 +27,10 @@ DROPBOX_DIR = os.getenv('DROPBOX_BACKUP_DIR', '/lightning-backups')
 LOCAL_BACKUP_DIR = os.getenv('LOCAL_BACKUP_DIR', '/home/ubuntu/lnd-backups')
 KEEP_LAST_N = int(os.getenv('KEEP_LAST_N_BACKUPS', '30'))
 
+# System identifier for multi-node setups
+import socket
+SYSTEM_ID = os.getenv('SYSTEM_ID', '').strip() or socket.gethostname()
+
 def setup_dropbox_client():
     """Initialize and verify Dropbox client"""
     if not DROPBOX_ACCESS_TOKEN or DROPBOX_ACCESS_TOKEN == 'YOUR_TOKEN_HERE_REPLACE_ME':
@@ -107,7 +111,7 @@ def create_backup_archive(timestamp):
 def cleanup_old_backups(dbx, prefix="tapd-backup-"):
     """Remove old tapd backups from Dropbox"""
     try:
-        result = dbx.files_list_folder(DROPBOX_DIR)
+        result = dbx.files_list_folder(f"{DROPBOX_DIR}/{SYSTEM_ID}")
         
         # Filter for tapd backup files
         backups = [
@@ -182,17 +186,24 @@ def upload_to_dropbox(archive_path, timestamp, checksums, max_retries=3):
     
     for attempt in range(max_retries):
         try:
-            # Generate Dropbox paths
-            timestamped_path = f"{DROPBOX_DIR}/tapd-backup-{timestamp}.tar.gz"
-            latest_path = f"{DROPBOX_DIR}/tapd-latest.tar.gz"
-            checksum_path = f"{DROPBOX_DIR}/tapd-backup-{timestamp}.checksums"
+            # Generate Dropbox paths with system identifier
+            system_dir = f"{DROPBOX_DIR}/{SYSTEM_ID}"
+            timestamped_path = f"{system_dir}/tapd-backup-{timestamp}.tar.gz"
+            latest_path = f"{system_dir}/tapd-latest.tar.gz"
+            checksum_path = f"{system_dir}/tapd-backup-{timestamp}.checksums"
             
-            # Create backup directory if it doesn't exist
+            # Create backup directories if they don't exist
             try:
                 dbx.files_get_metadata(DROPBOX_DIR)
             except:
                 dbx.files_create_folder_v2(DROPBOX_DIR)
                 print(f"Created Dropbox folder: {DROPBOX_DIR}")
+            
+            try:
+                dbx.files_get_metadata(system_dir)
+            except:
+                dbx.files_create_folder_v2(system_dir)
+                print(f"Created system folder: {system_dir}")
             
             # Upload timestamped backup
             print(f"Uploading backup to {timestamped_path}...")

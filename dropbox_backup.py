@@ -23,6 +23,10 @@ DROPBOX_DIR = os.getenv('DROPBOX_BACKUP_DIR', '/lightning-backups')
 LOCAL_BACKUP_DIR = os.getenv('LOCAL_BACKUP_DIR', '/var/backup/lnd')
 KEEP_LAST_N = int(os.getenv('KEEP_LAST_N_BACKUPS', '30'))
 
+# System identifier for multi-node setups
+import socket
+SYSTEM_ID = os.getenv('SYSTEM_ID', '').strip() or socket.gethostname()
+
 def setup_dropbox_client():
     """Initialize and verify Dropbox client"""
     if not DROPBOX_ACCESS_TOKEN or DROPBOX_ACCESS_TOKEN == 'YOUR_TOKEN_HERE_REPLACE_ME':
@@ -47,7 +51,7 @@ def cleanup_old_backups(dbx):
     """Remove old backups, keeping only the last N backups"""
     try:
         # List all files in backup directory
-        result = dbx.files_list_folder(DROPBOX_DIR)
+        result = dbx.files_list_folder(f"{DROPBOX_DIR}/{SYSTEM_ID}")
         
         # Filter for backup files (exclude the 'latest' file)
         backups = [
@@ -130,16 +134,23 @@ def upload_to_dropbox(max_retries=3):
             # First, create local backup (always do this, even if Dropbox fails)
             local_backup(file_contents, timestamp)
             
-            # Generate Dropbox paths
-            timestamped_path = f"{DROPBOX_DIR}/channel-backup-{timestamp}.backup"
-            latest_path = f"{DROPBOX_DIR}/channel-latest.backup"
+            # Generate Dropbox paths with system identifier
+            system_dir = f"{DROPBOX_DIR}/{SYSTEM_ID}"
+            timestamped_path = f"{system_dir}/channel-backup-{timestamp}.backup"
+            latest_path = f"{system_dir}/channel-latest.backup"
             
-            # Create backup directory if it doesn't exist
+            # Create backup directories if they don't exist
             try:
                 dbx.files_get_metadata(DROPBOX_DIR)
             except:
                 dbx.files_create_folder_v2(DROPBOX_DIR)
                 print(f"Created Dropbox folder: {DROPBOX_DIR}")
+            
+            try:
+                dbx.files_get_metadata(system_dir)
+            except:
+                dbx.files_create_folder_v2(system_dir)
+                print(f"Created system folder: {system_dir}")
             
             # Upload timestamped backup
             print(f"Uploading backup to {timestamped_path}...")
