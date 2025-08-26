@@ -20,6 +20,7 @@ load_dotenv()
 DROPBOX_ACCESS_TOKEN = os.getenv('DROPBOX_ACCESS_TOKEN')
 LOCAL_FILE = os.getenv('LND_CHANNEL_BACKUP_PATH', '/home/ubuntu/volumes/.lnd/data/chain/bitcoin/mainnet/channel.backup')
 DROPBOX_DIR = os.getenv('DROPBOX_BACKUP_DIR', '/lightning-backups')
+LOCAL_BACKUP_DIR = os.getenv('LOCAL_BACKUP_DIR', '/var/backup/lnd')
 KEEP_LAST_N = int(os.getenv('KEEP_LAST_N_BACKUPS', '30'))
 
 def setup_dropbox_client():
@@ -72,6 +73,34 @@ def cleanup_old_backups(dbx):
         print(f"Warning: Could not cleanup old backups: {e}")
         return 0
 
+def local_backup(file_contents, timestamp):
+    """Create local backup copy"""
+    try:
+        # Create local backup directory if it doesn't exist
+        Path(LOCAL_BACKUP_DIR).mkdir(parents=True, exist_ok=True)
+        
+        # Save timestamped local backup
+        local_file = Path(LOCAL_BACKUP_DIR) / f"channel-backup-{timestamp}.backup"
+        local_file.write_bytes(file_contents)
+        
+        # Also maintain a 'latest' copy locally
+        latest_file = Path(LOCAL_BACKUP_DIR) / "channel-latest.backup"
+        latest_file.write_bytes(file_contents)
+        
+        print(f"Local backup saved: {local_file}")
+        
+        # Cleanup old local backups
+        backups = sorted(Path(LOCAL_BACKUP_DIR).glob("channel-backup-*.backup"))
+        if len(backups) > KEEP_LAST_N:
+            for old_backup in backups[:-KEEP_LAST_N]:
+                old_backup.unlink()
+                print(f"Removed old local backup: {old_backup.name}")
+        
+        return True
+    except Exception as e:
+        print(f"Warning: Local backup failed: {e}")
+        return False
+
 def upload_to_dropbox(max_retries=3):
     """Upload channel.backup to Dropbox with retry logic"""
     
@@ -95,8 +124,13 @@ def upload_to_dropbox(max_retries=3):
             with open(backup_file, 'rb') as f:
                 file_contents = f.read()
             
-            # Generate filenames
+            # Generate timestamp for this backup
             timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+            
+            # First, create local backup (always do this, even if Dropbox fails)
+            local_backup(file_contents, timestamp)
+            
+            # Generate Dropbox paths
             timestamped_path = f"{DROPBOX_DIR}/channel-backup-{timestamp}.backup"
             latest_path = f"{DROPBOX_DIR}/channel-latest.backup"
             

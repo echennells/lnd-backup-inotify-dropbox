@@ -75,7 +75,9 @@ perform_backup() {
         export STAGED_BACKUP_FILE="$staging_file"
         
         # Trigger the backup with staged file
-        /home/ubuntu/lnd-backup-inotify-dropbox/venv/bin/python3 /home/ubuntu/lnd-backup-inotify-dropbox/dropbox_backup.py
+        # Use Nix-provided path if available, otherwise fallback to local
+        BACKUP_SCRIPT="${LND_BACKUP_DROPBOX_BIN:-/home/ubuntu/lnd-backup-inotify-dropbox/venv/bin/python3 /home/ubuntu/lnd-backup-inotify-dropbox/dropbox_backup.py}"
+        $BACKUP_SCRIPT
         
         if [ $? -eq 0 ]; then
             echo "[$(date)] Backup completed successfully"
