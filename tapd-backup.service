@@ -1,0 +1,27 @@
+[Unit]
+Description=Taproot Assets Database Backup
+After=network.target docker.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/lnd-backup-inotify-dropbox
+ExecStart=/home/ubuntu/lnd-backup-inotify-dropbox/venv/bin/python3 /home/ubuntu/lnd-backup-inotify-dropbox/tapd_backup.py
+
+# Environment
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tapd-backup
+
+# Security
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/home/ubuntu/lnd-backups /tmp
+ReadOnlyPaths=/home/ubuntu/volumes/.tapd
+
+[Install]
+WantedBy=multi-user.target

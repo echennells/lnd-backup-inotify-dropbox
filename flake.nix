@@ -37,14 +37,22 @@
             mkdir -p $out/lib/systemd/system
             mkdir -p $out/share/lnd-backup
             
-            # Install Python script with proper shebang
+            # Install Python scripts with proper shebang
             cp dropbox_backup.py $out/bin/lnd-backup-dropbox
             chmod +x $out/bin/lnd-backup-dropbox
             
-            # Wrap Python script to use Nix Python
+            # Install tapd backup script
+            cp tapd_backup.py $out/bin/tapd-backup-dropbox
+            chmod +x $out/bin/tapd-backup-dropbox
+            
+            # Wrap Python scripts to use Nix Python
             wrapProgram $out/bin/lnd-backup-dropbox \
               --set PYTHONPATH ${python-env}/${python-env.sitePackages} \
               --prefix PATH : ${pkgs.lib.makeBinPath [ python-env ]}
+            
+            wrapProgram $out/bin/tapd-backup-dropbox \
+              --set PYTHONPATH ${python-env}/${python-env.sitePackages} \
+              --prefix PATH : ${pkgs.lib.makeBinPath [ python-env pkgs.gnutar pkgs.gzip ]}
             
             # Install monitoring script
             cp channel-backup-monitor.sh $out/bin/lnd-backup-monitor
@@ -60,10 +68,17 @@
               ]} \
               --set LND_BACKUP_DROPBOX_BIN $out/bin/lnd-backup-dropbox
             
-            # Install systemd service
+            # Install systemd services
             substitute lnd-backup.service $out/lib/systemd/system/lnd-backup.service \
               --replace "/home/ubuntu/lnd-backup-inotify-dropbox/channel-backup-monitor.sh" "$out/bin/lnd-backup-monitor" \
               --replace "/home/ubuntu/lnd-backup-inotify-dropbox" "$out/share/lnd-backup"
+            
+            # Install tapd backup service and timer
+            cp tapd-backup.service $out/lib/systemd/system/
+            cp tapd-backup.timer $out/lib/systemd/system/
+            
+            substitute $out/lib/systemd/system/tapd-backup.service $out/lib/systemd/system/tapd-backup.service \
+              --replace "/home/ubuntu/lnd-backup-inotify-dropbox/venv/bin/python3 /home/ubuntu/lnd-backup-inotify-dropbox/tapd_backup.py" "$out/bin/tapd-backup-dropbox"
             
             # Copy configuration examples
             cp .env.example $out/share/lnd-backup/

@@ -1,0 +1,18 @@
+[Unit]
+Description=Daily Taproot Assets Database Backup Timer
+Requires=tapd-backup.service
+
+[Timer]
+# Run daily at 3 AM
+OnCalendar=daily
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+
+# Run immediately if system was offline at scheduled time
+AccuracySec=1h
+
+# Run on timer activation (first install)
+OnActiveSec=30s
+
+[Install]
+WantedBy=timers.target

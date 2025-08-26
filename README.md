@@ -1,10 +1,11 @@
-# LND Backup with inotify and Dropbox
+# LND & Taproot Assets Backup System
 
-Automated backup system for LND channel.backup files using inotify to detect changes and Dropbox for storage.
+Automated backup system for LND channel.backup files and Taproot Assets database using inotify to detect changes and Dropbox for storage.
 
 ## Features
 
 - **Automatic Detection**: Uses inotify to monitor channel.backup file changes
+- **Taproot Assets Support**: Daily backups of critical tapd database files
 - **Dropbox Integration**: Automatically uploads backups to Dropbox
 - **Timestamped Backups**: Keeps timestamped versions of all backups
 - **Latest Version**: Maintains a "latest" backup for easy access
@@ -108,7 +109,11 @@ Edit the `.env` file to customize:
 
 - `DROPBOX_ACCESS_TOKEN`: Your Dropbox API token
 - `LND_CHANNEL_BACKUP_PATH`: Path to your channel.backup file
+- `TAPD_ENABLED`: Enable Taproot Assets backups (default: false)
+- `TAPD_DATA_DIR`: Path to tapd data directory
+- `TAPD_BACKUP_INTERVAL`: Seconds between backups (86400 = daily)
 - `DROPBOX_BACKUP_DIR`: Directory in Dropbox for backups
+- `LOCAL_BACKUP_DIR`: Local directory for backup copies
 - `KEEP_LAST_N_BACKUPS`: Number of backups to retain (default: 30)
 
 ## File Structure
