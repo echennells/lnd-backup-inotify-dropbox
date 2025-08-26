@@ -4,13 +4,13 @@ Automated backup system for LND channel.backup files using inotify to detect cha
 
 ## Features
 
-- 🔍 **Automatic Detection**: Uses inotify to monitor channel.backup file changes
-- ☁️ **Dropbox Integration**: Automatically uploads backups to Dropbox
-- 📅 **Timestamped Backups**: Keeps timestamped versions of all backups
-- 🔄 **Latest Version**: Maintains a "latest" backup for easy access
-- 🧹 **Auto Cleanup**: Automatically removes old backups (configurable retention)
-- 🐳 **Docker Compatible**: Works with dockerized LND nodes
-- 🔧 **Systemd Service**: Runs as a system service with auto-restart
+- **Automatic Detection**: Uses inotify to monitor channel.backup file changes
+- **Dropbox Integration**: Automatically uploads backups to Dropbox
+- **Timestamped Backups**: Keeps timestamped versions of all backups
+- **Latest Version**: Maintains a "latest" backup for easy access
+- **Auto Cleanup**: Automatically removes old backups (configurable retention)
+- **Docker Compatible**: Works with dockerized LND nodes
+- **Systemd Service**: Runs as a system service with auto-restart
 
 ## Prerequisites
 
@@ -156,7 +156,7 @@ To restore from a backup:
 3. Place the backup file in the correct location
 4. Start LND with recovery options
 
-⚠️ **Important**: Channel backups are only for disaster recovery. They allow you to request channel closure from peers but don't restore channel state.
+**Important**: Channel backups are only for disaster recovery. They allow you to request channel closure from peers but don't restore channel state.
 
 ## Troubleshooting
 

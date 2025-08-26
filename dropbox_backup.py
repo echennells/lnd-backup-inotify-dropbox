@@ -160,7 +160,7 @@ def upload_to_dropbox(max_retries=3):
             
             # Get file size for logging
             file_size = len(file_contents)
-            print(f"✓ Backup successful: {file_size} bytes at {datetime.now()}")
+            print(f"Backup successful: {file_size} bytes at {datetime.now()}")
             
             # Cleanup old backups
             total_backups = cleanup_old_backups(dbx)
