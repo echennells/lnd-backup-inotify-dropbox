@@ -1,0 +1,24 @@
+[Unit]
+Description=LND Channel Backup Monitor with Dropbox
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+ExecStart=/home/ubuntu/lnd-backup-inotify-dropbox/channel-backup-monitor.sh
+Restart=always
+RestartSec=10
+User=ubuntu
+Group=ubuntu
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lnd-backup
+
+# Environment
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+WorkingDirectory=/home/ubuntu/lnd-backup-inotify-dropbox
+
+[Install]
+WantedBy=multi-user.target
