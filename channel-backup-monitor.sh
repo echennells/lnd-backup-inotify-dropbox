@@ -7,7 +7,7 @@
 export $(grep -v '^#' /home/ubuntu/lnd-backup-inotify-dropbox/.env | xargs)
 
 # Set default if not in env
-BACKUP_FILE="${LND_CHANNEL_BACKUP_PATH:-/home/ubuntu/volumes/.lnd/data/chain/bitcoin/mainnet/channel.backup}"
+BACKUP_FILE="${LND_CHANNEL_BACKUP_PATH:-/home/ubuntu/volumes/.lnd/data/chain/bitcoin/signet/channel.backup}"
 STAGING_DIR="/tmp/lnd-backup-staging"
 
 # Create staging directory

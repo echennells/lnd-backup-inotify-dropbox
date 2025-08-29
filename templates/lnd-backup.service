@@ -1,0 +1,36 @@
+[Unit]
+Description=LND Channel Backup Monitor (%NETWORK%)
+After=network.target lnd.service
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=%INSTALL_DIR%/lnd-backup-monitor
+Restart=on-failure
+RestartSec=30
+
+# User/Group for system service
+%USER_GROUP_SECTION%
+
+# Environment
+EnvironmentFile=%CONFIG_DIR%/config
+Environment="NETWORK=%NETWORK%"
+Environment="CONFIG_DIR=%CONFIG_DIR%"
+
+# Credential loading
+%CREDENTIAL_SECTION%
+
+# Security hardening
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+NoNewPrivileges=yes
+ReadWritePaths=%CONFIG_DIR% /tmp
+ReadOnlyPaths=%LND_DATA_DIR%
+
+# Resource limits
+MemoryMax=256M
+CPUQuota=20%
+
+[Install]
+WantedBy=%WANTED_BY%

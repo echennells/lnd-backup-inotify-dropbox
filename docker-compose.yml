@@ -1,0 +1,81 @@
+services:
+  lnd-backup:
+    build: .
+    container_name: lnd-backup-monitor
+    restart: unless-stopped
+    
+    environment:
+      # Required
+      - DROPBOX_TOKEN=${DROPBOX_TOKEN}
+      
+      # Network configuration (auto-detected from LND if not set)
+      - NETWORK=${NETWORK:-mainnet}
+      
+      # Paths
+      - LND_DATA_DIR=/lnd
+      - TAPD_DATA_DIR=/tapd
+      
+      # Backup settings
+      - CHECK_INTERVAL=${CHECK_INTERVAL:-300}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - ENABLE_TAPD=${ENABLE_TAPD:-false}
+    
+    volumes:
+      # Mount LND data directory (read-only)
+      - "${LND_DATA_DIR:-./lnd-data}:/lnd:ro"
+      
+      # Optional: TAP daemon data
+      - "${TAPD_DATA_DIR:-./tapd-data}:/tapd:ro"
+    
+    # Healthcheck
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "lnd-backup-monitor"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    
+    # Security
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.2'
+        reservations:
+          memory: 64M
+          cpus: '0.1'
+
+  # Example: Full LND + backup stack
+  # Uncomment if you want to run LND alongside the backup
+  # lnd:
+  #   image: lightninglabs/lnd:latest
+  #   container_name: lnd
+  #   volumes:
+  #     - lnd-data:/home/lnd/.lnd
+  #     - ./lnd.conf:/home/lnd/.lnd/lnd.conf:ro
+  #   ports:
+  #     - "9735:9735"
+  #     - "10009:10009"
+  #   depends_on:
+  #     - bitcoind
+  #   restart: unless-stopped
+
+  # bitcoind:
+  #   image: ruimarinho/bitcoin-core:latest
+  #   container_name: bitcoind
+  #   volumes:
+  #     - bitcoin-data:/home/bitcoin/.bitcoin
+  #     - ./bitcoin.conf:/home/bitcoin/.bitcoin/bitcoin.conf:ro
+  #   ports:
+  #     - "8332:8332"
+  #   restart: unless-stopped
+
+# volumes:
+#   lnd-data:
+#   bitcoin-data:

@@ -2,6 +2,14 @@
 .env
 .env.local
 .env.*.local
+.env.dev
+.env.prod
+
+# Configuration files with credentials
+config
+*.token
+dropbox.token
+credentials/
 
 # Python
 __pycache__/
@@ -17,6 +25,10 @@ ENV/
 *.backup
 *.bak
 *~
+channel.backup
+
+# Docker build artifacts
+.dockerignore
 
 # Logs
 *.log
@@ -30,3 +42,12 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# Nix
+result
+result-*
+
+# Test data
+test-data/
+lnd-data/
+tapd-data/

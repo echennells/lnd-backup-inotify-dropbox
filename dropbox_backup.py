@@ -16,8 +16,29 @@ import time
 # Load environment variables
 load_dotenv()
 
+def load_dropbox_token():
+    """Load Dropbox token from systemd credential or environment variable"""
+    # Try systemd credential first (preferred for production)
+    credentials_dir = os.getenv('CREDENTIALS_DIRECTORY')
+    if credentials_dir:
+        token_file = os.path.join(credentials_dir, 'dropbox-token')
+        try:
+            with open(token_file, 'r') as f:
+                token = f.read().strip()
+                if token and token != 'YOUR_TOKEN_HERE_REPLACE_ME':
+                    return token
+        except (FileNotFoundError, PermissionError):
+            pass
+    
+    # Fallback to environment variable (development/legacy)
+    token = os.getenv('DROPBOX_ACCESS_TOKEN')
+    if token and token != 'YOUR_TOKEN_HERE_REPLACE_ME':
+        return token
+    
+    return None
+
 # Configuration from environment
-DROPBOX_ACCESS_TOKEN = os.getenv('DROPBOX_ACCESS_TOKEN')
+DROPBOX_ACCESS_TOKEN = load_dropbox_token()
 LOCAL_FILE = os.getenv('LND_CHANNEL_BACKUP_PATH', '/home/ubuntu/volumes/.lnd/data/chain/bitcoin/mainnet/channel.backup')
 DROPBOX_DIR = os.getenv('DROPBOX_BACKUP_DIR', '/lightning-backups')
 LOCAL_BACKUP_DIR = os.getenv('LOCAL_BACKUP_DIR', '/var/backup/lnd')
@@ -29,9 +50,11 @@ SYSTEM_ID = os.getenv('SYSTEM_ID', '').strip() or socket.gethostname()
 
 def setup_dropbox_client():
     """Initialize and verify Dropbox client"""
-    if not DROPBOX_ACCESS_TOKEN or DROPBOX_ACCESS_TOKEN == 'YOUR_TOKEN_HERE_REPLACE_ME':
-        print("Error: DROPBOX_ACCESS_TOKEN not configured in .env file")
-        print("Please add your Dropbox access token to the .env file")
+    if not DROPBOX_ACCESS_TOKEN:
+        print("Error: DROPBOX_ACCESS_TOKEN not configured")
+        print("Please configure via systemd credential or .env file")
+        print("For systemd: store token in credential 'dropbox-token'")
+        print("For development: add DROPBOX_ACCESS_TOKEN to .env file")
         return None
     
     try:

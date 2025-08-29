@@ -6,10 +6,11 @@ Wants=docker.service
 [Service]
 Type=simple
 ExecStart=/home/ubuntu/lnd-backup-inotify-dropbox/channel-backup-monitor.sh
+LoadCredential=dropbox-token:/etc/lnd-backup/dropbox-token
 Restart=always
 RestartSec=10
-User=ubuntu
-Group=ubuntu
+User=bitcoinbackup
+Group=bitcoinbackup
 
 # Logging
 StandardOutput=journal
