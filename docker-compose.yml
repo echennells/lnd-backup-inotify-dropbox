@@ -24,6 +24,9 @@ services:
       - DROPBOX_BACKUP_DIR=${DROPBOX_BACKUP_DIR}
       - LOCAL_BACKUP_DIR=${LOCAL_BACKUP_DIR}
       - KEEP_LAST_N_BACKUPS=${KEEP_LAST_N_BACKUPS}
+      
+      # System identifier - use host hostname instead of container hostname
+      - SYSTEM_ID=${SYSTEM_ID:-${HOSTNAME}}
     
     volumes:
       # Mount LND data directory (read-only) - using actual path
