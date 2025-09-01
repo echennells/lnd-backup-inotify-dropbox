@@ -13,11 +13,9 @@ RUN apk add --no-cache \
 RUN python3 -m venv /opt/lnd-backup
 ENV PATH="/opt/lnd-backup/bin:$PATH"
 
-# Install Python dependencies in virtual environment
-RUN pip install --no-cache-dir \
-    requests \
-    python-dotenv \
-    dropbox
+# Copy requirements and install Python dependencies in virtual environment
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 # Create app user
 RUN adduser -D -u 1000 -h /app -s /bin/bash lndbackup
@@ -26,7 +24,9 @@ RUN adduser -D -u 1000 -h /app -s /bin/bash lndbackup
 WORKDIR /app
 
 # Copy source files
-COPY dropbox_backup.py /app/
+COPY backup.py /app/
+COPY storage_providers.py /app/
+COPY azure_provider.py /app/
 COPY templates/ /app/templates/
 
 # Process templates at build time using environment defaults
@@ -51,7 +51,7 @@ RUN sed -e "s|%NETWORK%|${NETWORK}|g" \
 
 # Process monitor script template
 RUN sed -e 's|source "${CONFIG_DIR}/config"|source "/app/config"|g' \
-        -e 's|"$(dirname "$0")/dropbox_backup.py"|"/app/dropbox_backup.py"|g' \
+        -e 's|"$(dirname "$0")/dropbox_backup.py"|"/app/backup.py"|g' \
         /app/templates/lnd-backup-monitor.sh > /app/lnd-backup-monitor \
     && chmod +x /app/lnd-backup-monitor
 
@@ -111,11 +111,13 @@ fi
 HOSTNAME=${HOSTNAME:-$(hostname)}
 sed -i "s|%HOSTNAME%|${HOSTNAME}|g" "$CONFIG_FILE"
 
-# Validate required environment - support both variable names
-if [[ -n "${DROPBOX_ACCESS_TOKEN:-}" ]]; then
-    export DROPBOX_TOKEN="$DROPBOX_ACCESS_TOKEN"
-elif [[ -z "${DROPBOX_TOKEN:-}" ]]; then
-    echo "ERROR: DROPBOX_TOKEN or DROPBOX_ACCESS_TOKEN environment variable is required"
+# Validate required environment variables for storage provider
+if [[ -z "${STORAGE_PROVIDER:-}" ]]; then
+    export STORAGE_PROVIDER="azure"  # Default to azure
+fi
+
+if [[ "$STORAGE_PROVIDER" == "azure" && -z "${AZURE_BLOB_SAS_URL:-}" ]]; then
+    echo "ERROR: AZURE_BLOB_SAS_URL environment variable is required for Azure storage provider"
     exit 1
 fi
 

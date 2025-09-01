@@ -4,30 +4,31 @@ set -euo pipefail
 # Load configuration
 source "${CONFIG_DIR}/config"
 
-# Load Dropbox token from systemd credentials or file
-if [[ -n "${CREDENTIALS_DIRECTORY:-}" ]] && [[ -f "$CREDENTIALS_DIRECTORY/dropbox.token" ]]; then
-    export DROPBOX_TOKEN=$(cat "$CREDENTIALS_DIRECTORY/dropbox.token")
-elif [[ -n "${DROPBOX_TOKEN_FILE:-}" ]] && [[ -f "$DROPBOX_TOKEN_FILE" ]]; then
-    export DROPBOX_TOKEN=$(cat "$DROPBOX_TOKEN_FILE")
-elif [[ -z "${DROPBOX_TOKEN:-}" ]]; then
-    echo "ERROR: No Dropbox token available"
+# Validate storage provider configuration
+if [[ -z "${STORAGE_PROVIDER:-}" ]]; then
+    export STORAGE_PROVIDER="azure"  # Default to azure
+fi
+
+if [[ "$STORAGE_PROVIDER" == "azure" && -z "${AZURE_BLOB_SAS_URL:-}" ]]; then
+    echo "ERROR: AZURE_BLOB_SAS_URL environment variable is required for Azure storage provider"
     exit 1
 fi
 
 echo "Starting LND Backup Monitor"
 echo "Network: $NETWORK"
+echo "Storage Provider: $STORAGE_PROVIDER"
 echo "Monitoring: $CHANNEL_BACKUP_PATH"
-echo "Backup to: $BACKUP_PATH_PREFIX"
 
 # Function to upload backup
 upload_backup() {
     local backup_file="$1"
-    local timestamp=$(date +%Y%m%d-%H%M%S)
-    local remote_path="$BACKUP_PATH_PREFIX/channel-${timestamp}.backup"
     
-    echo "[$(date)] Uploading backup to $remote_path"
+    echo "[$(date)] Starting backup upload for $backup_file"
     
-    if python3 "$(dirname "$0")/dropbox_backup.py" "$backup_file" "$remote_path"; then
+    # Set the staged backup file for the Python script to use
+    export STAGED_BACKUP_FILE="$backup_file"
+    
+    if python3 "$(dirname "$0")/dropbox_backup.py"; then
         echo "[$(date)] Backup uploaded successfully"
     else
         echo "[$(date)] ERROR: Backup upload failed"
