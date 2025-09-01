@@ -4,19 +4,18 @@ set -euo pipefail
 # Load configuration
 source "${CONFIG_DIR}/config"
 
-# Validate storage provider configuration
-if [[ -z "${STORAGE_PROVIDER:-}" ]]; then
-    export STORAGE_PROVIDER="azure"  # Default to azure
-fi
-
-if [[ "$STORAGE_PROVIDER" == "azure" && -z "${AZURE_BLOB_SAS_URL:-}" ]]; then
-    echo "ERROR: AZURE_BLOB_SAS_URL environment variable is required for Azure storage provider"
+# Validate storage connection string
+if [[ -z "${STORAGE_CONNECTION_STRING:-}" ]]; then
+    echo "ERROR: STORAGE_CONNECTION_STRING environment variable is required"
     exit 1
 fi
 
+# Extract provider from connection string for logging
+PROVIDER=$(echo "$STORAGE_CONNECTION_STRING" | cut -d':' -f1)
+
 echo "Starting LND Backup Monitor"
 echo "Network: $NETWORK"
-echo "Storage Provider: $STORAGE_PROVIDER"
+echo "Storage Provider: $PROVIDER"
 echo "Monitoring: $CHANNEL_BACKUP_PATH"
 
 # Function to upload backup
@@ -28,7 +27,7 @@ upload_backup() {
     # Set the staged backup file for the Python script to use
     export STAGED_BACKUP_FILE="$backup_file"
     
-    if python3 "$(dirname "$0")/dropbox_backup.py"; then
+    if python3 "$(dirname "$0")/backup.py"; then
         echo "[$(date)] Backup uploaded successfully"
     else
         echo "[$(date)] ERROR: Backup upload failed"
