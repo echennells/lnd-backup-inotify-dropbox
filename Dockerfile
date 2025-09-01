@@ -112,12 +112,8 @@ HOSTNAME=${HOSTNAME:-$(hostname)}
 sed -i "s|%HOSTNAME%|${HOSTNAME}|g" "$CONFIG_FILE"
 
 # Validate required environment variables for storage provider
-if [[ -z "${STORAGE_PROVIDER:-}" ]]; then
-    export STORAGE_PROVIDER="azure"  # Default to azure
-fi
-
-if [[ "$STORAGE_PROVIDER" == "azure" && -z "${AZURE_BLOB_SAS_URL:-}" ]]; then
-    echo "ERROR: AZURE_BLOB_SAS_URL environment variable is required for Azure storage provider"
+if [[ -z "${STORAGE_CONNECTION_STRING:-}" ]]; then
+    echo "ERROR: STORAGE_CONNECTION_STRING environment variable is required"
     exit 1
 fi
 
