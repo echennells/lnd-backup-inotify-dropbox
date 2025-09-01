@@ -13,7 +13,7 @@ services:
       
       # Paths
       - LND_DATA_DIR=/lnd
-      - LND_CHANNEL_BACKUP_PATH=/lnd/data/chain/bitcoin/signet/channel.backup
+      - LND_CHANNEL_BACKUP_PATH=/lnd/data/chain/bitcoin/${NETWORK:-signet}/channel.backup
       - TAPD_DATA_DIR=/tapd
       
       # Backup settings
