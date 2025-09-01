@@ -1,21 +1,26 @@
-FROM debian:bookworm-slim
+FROM alpine:3.19
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apk add --no-cache \
     python3 \
-    python3-pip \
+    py3-pip \
+    py3-virtualenv \
     inotify-tools \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+    bash \
+    curl
 
-# Install Python dependencies
-RUN pip3 install --no-cache-dir \
+# Create virtual environment (the proper way)
+RUN python3 -m venv /opt/lnd-backup
+ENV PATH="/opt/lnd-backup/bin:$PATH"
+
+# Install Python dependencies in virtual environment
+RUN pip install --no-cache-dir \
     requests \
     python-dotenv \
     dropbox
 
 # Create app user
-RUN useradd -r -u 1000 -m -d /app -s /bin/bash lndbackup
+RUN adduser -D -u 1000 -h /app -s /bin/bash lndbackup
 
 # Set working directory
 WORKDIR /app
@@ -106,9 +111,11 @@ fi
 HOSTNAME=${HOSTNAME:-$(hostname)}
 sed -i "s|%HOSTNAME%|${HOSTNAME}|g" "$CONFIG_FILE"
 
-# Validate required environment
-if [[ -z "${DROPBOX_TOKEN:-}" ]]; then
-    echo "ERROR: DROPBOX_TOKEN environment variable is required"
+# Validate required environment - support both variable names
+if [[ -n "${DROPBOX_ACCESS_TOKEN:-}" ]]; then
+    export DROPBOX_TOKEN="$DROPBOX_ACCESS_TOKEN"
+elif [[ -z "${DROPBOX_TOKEN:-}" ]]; then
+    echo "ERROR: DROPBOX_TOKEN or DROPBOX_ACCESS_TOKEN environment variable is required"
     exit 1
 fi
 

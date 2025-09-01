@@ -5,24 +5,29 @@ services:
     restart: unless-stopped
     
     environment:
-      # Required
-      - DROPBOX_TOKEN=${DROPBOX_TOKEN}
+      # Required - using DROPBOX_ACCESS_TOKEN from .env file
+      - DROPBOX_TOKEN=${DROPBOX_ACCESS_TOKEN}
+      - DROPBOX_ACCESS_TOKEN=${DROPBOX_ACCESS_TOKEN}
       
-      # Network configuration (auto-detected from LND if not set)
-      - NETWORK=${NETWORK:-mainnet}
+      # Network configuration - using signet for Mutinynet
+      - NETWORK=signet
       
       # Paths
       - LND_DATA_DIR=/lnd
+      - LND_CHANNEL_BACKUP_PATH=/lnd/data/chain/bitcoin/signet/channel.backup
       - TAPD_DATA_DIR=/tapd
       
       # Backup settings
       - CHECK_INTERVAL=${CHECK_INTERVAL:-300}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - ENABLE_TAPD=${ENABLE_TAPD:-false}
+      - DROPBOX_BACKUP_DIR=${DROPBOX_BACKUP_DIR}
+      - LOCAL_BACKUP_DIR=${LOCAL_BACKUP_DIR}
+      - KEEP_LAST_N_BACKUPS=${KEEP_LAST_N_BACKUPS}
     
     volumes:
-      # Mount LND data directory (read-only)
-      - "${LND_DATA_DIR:-./lnd-data}:/lnd:ro"
+      # Mount LND data directory (read-only) - using actual path
+      - "/home/ubuntu/volumes/.lnd:/lnd:ro"
       
       # Optional: TAP daemon data
       - "${TAPD_DATA_DIR:-./tapd-data}:/tapd:ro"
@@ -37,7 +42,7 @@ services:
     
     # Security
     user: "1000:1000"
-    read_only: true
+    # read_only: true  # Disabled to allow config file writes
     tmpfs:
       - /tmp
     
