@@ -1,0 +1,25 @@
+#!/bin/bash
+# LND Backup Configuration
+# Generated: %DATE%
+# Host: %HOSTNAME%
+
+# Network configuration
+NETWORK="%NETWORK%"
+
+# LND paths
+LND_DATA_DIR="%LND_DATA_DIR%"
+CHANNEL_BACKUP_PATH="%CHANNEL_BACKUP_PATH%"
+
+# TAP daemon configuration
+TAPD_DATA_DIR="%TAPD_DATA_DIR%"
+ENABLE_TAPD="%ENABLE_TAPD%"
+
+# Backup configuration
+BACKUP_PATH_PREFIX="/lnd-backups/${NETWORK}"
+CHECK_INTERVAL="%CHECK_INTERVAL%"
+
+# Logging
+LOG_LEVEL="%LOG_LEVEL%"
+
+# System identifier (for multi-node deployments)
+SYSTEM_IDENTIFIER="${SYSTEM_IDENTIFIER:-default}"

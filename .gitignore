@@ -6,7 +6,7 @@
 .env.prod
 
 # Configuration files with credentials
-config
+/config
 *.token
 dropbox.token
 credentials/
