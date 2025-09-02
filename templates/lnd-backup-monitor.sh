@@ -45,21 +45,60 @@ fi
 
 # Monitor for changes
 echo "Monitoring for changes..."
+
+# Track last modification time for fallback checking
+LAST_MTIME=0
+if [[ -f "$CHANNEL_BACKUP_PATH" ]]; then
+    LAST_MTIME=$(stat -c %Y "$CHANNEL_BACKUP_PATH" 2>/dev/null || echo 0)
+fi
+
 while true; do
     # Wait for file changes or timeout
-    if inotifywait -e modify,create,close_write -t "${CHECK_INTERVAL}" \
-        "$(dirname "$CHANNEL_BACKUP_PATH")" 2>/dev/null | grep -q "channel.backup"; then
-        
+    # Watch the specific file, not just the directory
+    INOTIFY_OUTPUT=""
+    if [[ -f "$CHANNEL_BACKUP_PATH" ]]; then
+        # Watch the existing file
+        INOTIFY_OUTPUT=$(timeout "${CHECK_INTERVAL}" inotifywait -e modify,create,close_write,moved_to,moved_from "$CHANNEL_BACKUP_PATH" 2>&1 || true)
+    else
+        # Watch the directory for file creation
+        INOTIFY_OUTPUT=$(timeout "${CHECK_INTERVAL}" inotifywait -e create,moved_to "$(dirname "$CHANNEL_BACKUP_PATH")" 2>&1 | grep "channel.backup" || true)
+    fi
+    
+    FILE_CHANGED=false
+    
+    # Check if inotify detected a change
+    if [[ -n "$INOTIFY_OUTPUT" ]] && [[ "$INOTIFY_OUTPUT" != *"timed out"* ]] && [[ "$INOTIFY_OUTPUT" != *"No such file"* ]]; then
+        echo "[$(date)] inotify detected change: $INOTIFY_OUTPUT"
+        FILE_CHANGED=true
+    fi
+    
+    # Fallback: check modification time even if inotify didn't trigger
+    if [[ -f "$CHANNEL_BACKUP_PATH" ]]; then
+        CURRENT_MTIME=$(stat -c %Y "$CHANNEL_BACKUP_PATH" 2>/dev/null || echo 0)
+        if [[ "$CURRENT_MTIME" -gt "$LAST_MTIME" ]]; then
+            if [[ "$FILE_CHANGED" == false ]]; then
+                echo "[$(date)] Fallback detection: file modified (mtime changed from $LAST_MTIME to $CURRENT_MTIME)"
+            fi
+            FILE_CHANGED=true
+            LAST_MTIME=$CURRENT_MTIME
+        fi
+    fi
+    
+    if [[ "$FILE_CHANGED" == true ]]; then
         # File changed, wait a moment for write to complete
-        sleep 2
+        sleep 3
         
         if [[ -f "$CHANNEL_BACKUP_PATH" ]]; then
             upload_backup "$CHANNEL_BACKUP_PATH"
+            # Update mtime after successful backup
+            LAST_MTIME=$(stat -c %Y "$CHANNEL_BACKUP_PATH" 2>/dev/null || echo 0)
+        else
+            echo "[$(date)] WARNING: File disappeared after change detection"
         fi
     else
-        # Timeout reached, do periodic backup if file exists
-        if [[ -f "$CHANNEL_BACKUP_PATH" ]] && [[ "${LOG_LEVEL:-info}" == "debug" ]]; then
-            echo "[$(date)] Periodic check - file unchanged"
+        # Timeout reached - this is normal, just continue monitoring
+        if [[ "${LOG_LEVEL:-info}" == "debug" ]]; then
+            echo "[$(date)] Monitoring timeout - continuing to watch for changes"
         fi
     fi
 done
