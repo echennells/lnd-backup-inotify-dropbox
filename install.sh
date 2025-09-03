@@ -123,7 +123,7 @@ fi
 
 # Install Python dependencies
 log_info "Installing Python dependencies..."
-pip3 install --user requests python-dotenv dropbox
+pip3 install --user -r "$SCRIPT_DIR/requirements.txt"
 
 # Create directories
 log_info "Creating directories..."
@@ -136,28 +136,31 @@ if [[ $EUID -eq 0 ]]; then
     chmod 700 "$CRED_DIR"
 fi
 
-# Handle Dropbox token
-if [[ -z "${DROPBOX_TOKEN:-}" ]]; then
-    log_warn "DROPBOX_TOKEN not set in environment"
-    read -sp "Enter your Dropbox token: " DROPBOX_TOKEN
+# Handle storage connection string
+if [[ -z "${STORAGE_CONNECTION_STRING:-}" ]]; then
+    log_warn "STORAGE_CONNECTION_STRING not set in environment"
+    echo "Supported formats:"
+    echo "  dropbox:TOKEN"
+    echo "  azure:CONNECTION_STRING"
     echo
+    read -p "Enter your storage connection string: " STORAGE_CONNECTION_STRING
 fi
 
 # Store credentials securely
 if command -v systemd-creds &> /dev/null && systemctl --version | grep -q "systemd 24[6-9]\|systemd 25[0-9]"; then
     log_info "Using systemd-creds for secure credential storage..."
-    echo -n "$DROPBOX_TOKEN" | systemd-creds encrypt - "$CRED_DIR/dropbox.token" 2>/dev/null || {
+    echo -n "$STORAGE_CONNECTION_STRING" | systemd-creds encrypt - "$CRED_DIR/storage.connection" 2>/dev/null || {
         log_warn "systemd-creds failed, using restricted file"
-        echo -n "$DROPBOX_TOKEN" > "$CRED_DIR/dropbox.token"
-        chmod 600 "$CRED_DIR/dropbox.token"
+        echo -n "$STORAGE_CONNECTION_STRING" > "$CRED_DIR/storage.connection"
+        chmod 600 "$CRED_DIR/storage.connection"
     }
-    CREDENTIAL_SECTION="LoadCredential=dropbox.token:$CRED_DIR/dropbox.token
+    CREDENTIAL_SECTION="LoadCredential=storage.connection:$CRED_DIR/storage.connection
 Environment=\"CREDENTIALS_DIRECTORY=%d/credentials\""
 else
-    log_info "Storing token in restricted file..."
-    echo -n "$DROPBOX_TOKEN" > "$CRED_DIR/dropbox.token"
-    chmod 600 "$CRED_DIR/dropbox.token"
-    CREDENTIAL_SECTION="Environment=\"DROPBOX_TOKEN_FILE=$CRED_DIR/dropbox.token\""
+    log_info "Storing connection string in restricted file..."
+    echo -n "$STORAGE_CONNECTION_STRING" > "$CRED_DIR/storage.connection"
+    chmod 600 "$CRED_DIR/storage.connection"
+    CREDENTIAL_SECTION="Environment=\"STORAGE_CONNECTION_STRING_FILE=$CRED_DIR/storage.connection\""
 fi
 
 # Copy and configure templates
@@ -178,9 +181,18 @@ sed -e "s|%NETWORK%|$NETWORK|g" \
 # Install scripts
 log_info "Installing scripts..."
 cp "$SCRIPT_DIR/templates/lnd-backup-monitor.sh" "$INSTALL_DIR/lnd-backup-monitor"
-cp "$SCRIPT_DIR/dropbox_backup.py" "$INSTALL_DIR/dropbox_backup.py"
+cp "$SCRIPT_DIR/backup.py" "$INSTALL_DIR/backup.py"
+cp "$SCRIPT_DIR/storage_providers.py" "$INSTALL_DIR/storage_providers.py"
+cp "$SCRIPT_DIR/dropbox_provider.py" "$INSTALL_DIR/dropbox_provider.py"
+cp "$SCRIPT_DIR/azure_provider.py" "$INSTALL_DIR/azure_provider.py"
+
+# Process and install wrapper script
+sed -e "s|%INSTALL_DIR%|$INSTALL_DIR|g" \
+    "$SCRIPT_DIR/templates/lnd-backup-wrapper.sh" > "$INSTALL_DIR/lnd-backup-wrapper"
+
 chmod +x "$INSTALL_DIR/lnd-backup-monitor"
-chmod +x "$INSTALL_DIR/dropbox_backup.py"
+chmod +x "$INSTALL_DIR/lnd-backup-wrapper"
+chmod +x "$INSTALL_DIR/backup.py"
 
 # Process systemd service template
 if [[ $SYSTEMD_SCOPE == "system" ]]; then

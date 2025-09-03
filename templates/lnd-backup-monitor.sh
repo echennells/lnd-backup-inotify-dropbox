@@ -66,8 +66,8 @@ while true; do
     
     FILE_CHANGED=false
     
-    # Check if inotify detected a change
-    if [[ -n "$INOTIFY_OUTPUT" ]] && [[ "$INOTIFY_OUTPUT" != *"timed out"* ]] && [[ "$INOTIFY_OUTPUT" != *"No such file"* ]]; then
+    # Check if inotify detected a change (filter out "Setting up watches" messages)
+    if [[ -n "$INOTIFY_OUTPUT" ]] && [[ "$INOTIFY_OUTPUT" != *"timed out"* ]] && [[ "$INOTIFY_OUTPUT" != *"No such file"* ]] && [[ "$INOTIFY_OUTPUT" != *"Setting up watches"* ]]; then
         echo "[$(date)] inotify detected change: $INOTIFY_OUTPUT"
         FILE_CHANGED=true
     fi

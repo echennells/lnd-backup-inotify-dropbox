@@ -5,7 +5,7 @@ Wants=network.target
 
 [Service]
 Type=simple
-ExecStart=%INSTALL_DIR%/lnd-backup-monitor
+ExecStart=%INSTALL_DIR%/lnd-backup-wrapper
 Restart=on-failure
 RestartSec=30
 

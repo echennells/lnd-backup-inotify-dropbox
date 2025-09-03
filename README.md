@@ -4,14 +4,16 @@ Automated backup system for LND channel.backup files and Taproot Assets database
 
 ## Features
 
-- **Automatic Detection**: Uses inotify to monitor channel.backup file changes
+- **Automatic Detection**: Uses inotify to monitor channel.backup file changes with fallback polling
 - **Taproot Assets Support**: Daily backups of critical tapd database files
-- **Dropbox Integration**: Automatically uploads backups to Dropbox
+- **Multiple Storage Providers**: Supports Dropbox and Azure Blob Storage
+- **Pluggable Architecture**: Easy to add new storage providers
 - **Timestamped Backups**: Keeps timestamped versions of all backups
 - **Latest Version**: Maintains a "latest" backup for easy access
 - **Auto Cleanup**: Automatically removes old backups (configurable retention)
 - **Docker Compatible**: Works with dockerized LND nodes
-- **Systemd Service**: Runs as a system service with auto-restart
+- **Local Installation**: Native systemd service installation
+- **Secure Credentials**: Uses systemd-creds when available
 
 ## Prerequisites
 
@@ -19,7 +21,7 @@ Automated backup system for LND channel.backup files and Taproot Assets database
 - LND node (dockerized or native)
 - Python 3.6+
 - inotify-tools package
-- Dropbox account and API access token
+- Storage provider account (Dropbox or Azure)
 
 ## Installation
 
@@ -31,19 +33,9 @@ git clone https://github.com/echennells/lnd-backup-inotify-dropbox.git
 cd lnd-backup-inotify-dropbox
 ```
 
-### 2. Install dependencies
+### 2. Configure Storage Provider
 
-```bash
-# Install system packages
-sudo apt update
-sudo apt install -y inotify-tools python3-pip
-
-# Install Python packages
-pip3 install -r requirements.txt
-```
-
-### 3. Configure Dropbox Access
-
+#### Dropbox Setup
 1. Go to https://www.dropbox.com/developers/apps
 2. Click "Create app"
 3. Choose "Scoped access"
@@ -58,43 +50,50 @@ pip3 install -r requirements.txt
 9. Under "OAuth 2", click "Generate" for Access Token
 10. Copy the token
 
-### 4. Configure the backup system
+#### Azure Blob Storage Setup
+1. Create an Azure Storage Account
+2. Get the connection string from Azure Portal
+3. Format: `DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...;EndpointSuffix=core.windows.net`
+
+### 3. Automated Installation
 
 ```bash
-# Copy the environment file
-cp .env.example .env
+# Set your storage connection string
+export STORAGE_CONNECTION_STRING="dropbox:YOUR_DROPBOX_TOKEN"
+# OR for Azure:
+# export STORAGE_CONNECTION_STRING="azure:YOUR_CONNECTION_STRING"
 
-# Edit .env and add your Dropbox token
-nano .env
+# Run the installer
+./install.sh
+
+# Start the service
+sudo systemctl enable --now lnd-backup
+# OR for user installation:
+# systemctl --user enable --now lnd-backup
 ```
 
-Update the `DROPBOX_ACCESS_TOKEN` with your token from step 3.
-
-### 5. Test the backup script
+### 4. Manual Installation
 
 ```bash
-# Make scripts executable
-chmod +x channel-backup-monitor.sh
-chmod +x dropbox_backup.py
+# Install system packages
+sudo apt update
+sudo apt install -y inotify-tools python3-pip
+
+# Install Python packages
+pip3 install -r requirements.txt
 
 # Test the backup manually
-python3 dropbox_backup.py
-```
+export STORAGE_CONNECTION_STRING="dropbox:YOUR_TOKEN"
+python3 backup.py
 
-### 6. Install systemd service
-
-```bash
 # Copy service file
 sudo cp lnd-backup.service /etc/systemd/system/
 
 # Reload systemd
 sudo systemctl daemon-reload
 
-# Enable service to start on boot
-sudo systemctl enable lnd-backup
-
-# Start the service
-sudo systemctl start lnd-backup
+# Enable and start service
+sudo systemctl enable --now lnd-backup
 
 # Check service status
 sudo systemctl status lnd-backup
@@ -105,37 +104,46 @@ sudo journalctl -fu lnd-backup
 
 ## Configuration
 
-Edit the `.env` file to customize:
+The system uses a connection string approach for storage configuration:
 
-- `DROPBOX_ACCESS_TOKEN`: Your Dropbox API token
-- `LND_CHANNEL_BACKUP_PATH`: Path to your channel.backup file
-- `TAPD_ENABLED`: Enable Taproot Assets backups (default: false)
-- `TAPD_DATA_DIR`: Path to tapd data directory
-- `TAPD_BACKUP_INTERVAL`: Seconds between backups (86400 = daily)
-- `DROPBOX_BACKUP_DIR`: Directory in Dropbox for backups
-- `LOCAL_BACKUP_DIR`: Local directory for backup copies
-- `KEEP_LAST_N_BACKUPS`: Number of backups to retain (default: 30)
+### Storage Connection Strings
+- **Dropbox**: `dropbox:YOUR_ACCESS_TOKEN`
+- **Azure**: `azure:YOUR_CONNECTION_STRING`
+
+### Environment Variables
+- `STORAGE_CONNECTION_STRING`: Storage provider connection string
+- `NETWORK`: Bitcoin network (mainnet, testnet, signet, regtest)
+- `CHECK_INTERVAL`: Seconds between fallback checks (default: 300)
+- `ENABLE_TAPD`: Enable Taproot Assets backups (default: false)
+- `LOG_LEVEL`: Logging level (debug, info, warn, error)
 
 ## File Structure
 
 ```
 lnd-backup-inotify-dropbox/
-├── .env                      # Configuration (not in git)
-├── .env.example              # Example configuration
-├── dropbox_backup.py         # Python script for Dropbox upload
-├── channel-backup-monitor.sh # Bash script using inotify
-├── lnd-backup.service        # Systemd service definition
-├── requirements.txt          # Python dependencies
-└── README.md                 # This file
+├── backup.py                    # Main backup script with provider support
+├── storage_providers.py         # Storage provider interface
+├── dropbox_provider.py          # Dropbox storage implementation
+├── azure_provider.py           # Azure Blob storage implementation
+├── install.sh                  # Automated installation script
+├── requirements.txt            # Python dependencies
+├── templates/
+│   ├── config                  # Configuration template
+│   ├── lnd-backup-monitor.sh   # inotify monitoring script
+│   ├── lnd-backup.service      # Systemd service template
+│   ├── lnd-backup-wrapper.sh   # Service wrapper script
+│   └── uninstall.sh           # Uninstall script template
+└── README.md                   # This file
 ```
 
 ## How It Works
 
-1. **inotify Monitor**: The `channel-backup-monitor.sh` script uses `inotifywait` to watch for changes to the channel.backup file
-2. **Change Detection**: When LND updates the backup file (channel opened/closed), inotify triggers
-3. **Dropbox Upload**: The Python script uploads the backup with timestamp
-4. **Retention**: Old backups are automatically deleted based on configuration
-5. **Service Management**: Systemd ensures the monitor runs continuously
+1. **Hybrid Monitoring**: Uses inotify to watch for channel.backup changes with fallback polling every 5 minutes
+2. **Storage Abstraction**: Pluggable storage providers (Dropbox, Azure) with consistent interface
+3. **Secure Credentials**: Uses systemd-creds or restricted files for credential storage
+4. **Automatic Upload**: When changes detected, uploads to configured storage provider with timestamped naming
+5. **Retention**: Old backups are automatically deleted based on configuration
+6. **Service Management**: Systemd ensures the monitor runs continuously
 
 ## Monitoring
 
