@@ -25,6 +25,33 @@ Automated backup system for LND channel.backup files and Taproot Assets database
 
 ## Installation
 
+### User and Permission Management
+
+The backup system requires proper permissions to access LND's channel.backup file. The installer handles this automatically, but understanding the setup is important:
+
+**System Installation (Recommended for production):**
+- Creates `lndbackup` system user
+- Creates `bitcoin` group for shared access
+- Adds both `lnd` and `lndbackup` users to `bitcoin` group
+- Sets proper group permissions on LND directories
+
+**User Installation (Development/testing):**
+- Runs as current user
+- May require manual permission fixes if LND runs as different user
+
+**Manual Permission Fix (if needed):**
+```bash
+# Create bitcoin group and add users
+sudo groupadd bitcoin
+sudo usermod -a -G bitcoin lnd        # Add LND user to bitcoin group
+sudo usermod -a -G bitcoin lndbackup  # Add backup user to bitcoin group
+
+# Fix LND directory permissions
+sudo chgrp -R bitcoin ~/.lnd/data
+sudo chmod -R g+rx ~/.lnd/data
+sudo chmod g+r ~/.lnd/data/chain/bitcoin/*/channel.backup
+```
+
 ### 1. Clone the repository
 
 ```bash
@@ -52,8 +79,16 @@ cd lnd-backup-inotify-dropbox
 
 #### Azure Blob Storage Setup
 1. Create an Azure Storage Account
-2. Get the connection string from Azure Portal
-3. Format: `DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...;EndpointSuffix=core.windows.net`
+2. Create a container for backups
+3. Generate a SAS token with these permissions:
+   - **Read** (r): Read blob contents
+   - **Add** (a): Add new blobs
+   - **Create** (c): Create new blobs  
+   - **Write** (w): Write to blobs
+   - **List** (l): List blobs in container
+4. Use this URL format: `azure://account.blob.core.windows.net/container?sp=racwl&st=...&se=...&spr=https&sv=...&sr=c&sig=...`
+
+**Important**: Ensure the SAS token has `sp=racwl` permissions, not just `sp=r` (read-only).
 
 ### 3. Automated Installation
 
@@ -61,7 +96,7 @@ cd lnd-backup-inotify-dropbox
 # Set your storage connection string
 export STORAGE_CONNECTION_STRING="dropbox:YOUR_DROPBOX_TOKEN"
 # OR for Azure:
-# export STORAGE_CONNECTION_STRING="azure:YOUR_CONNECTION_STRING"
+# export STORAGE_CONNECTION_STRING="azure://account.blob.core.windows.net/container?sp=racwl&..."
 
 # Run the installer
 ./install.sh
@@ -108,7 +143,7 @@ The system uses a connection string approach for storage configuration:
 
 ### Storage Connection Strings
 - **Dropbox**: `dropbox:YOUR_ACCESS_TOKEN`
-- **Azure**: `azure:YOUR_CONNECTION_STRING`
+- **Azure**: `azure://account.blob.core.windows.net/container?sp=racwl&...`
 
 ### Environment Variables
 - `STORAGE_CONNECTION_STRING`: Storage provider connection string

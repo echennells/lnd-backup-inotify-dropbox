@@ -41,6 +41,7 @@ detect_lnd_config() {
     echo "$network"
 }
 
+
 # Get channel.backup path based on network
 get_backup_path() {
     local lnd_dir="${LND_DATA_DIR:-$HOME/.lnd}"
@@ -66,11 +67,24 @@ get_backup_path() {
     esac
 }
 
+# Create lndbackup user if running as root
+create_backup_user() {
+    if [[ $EUID -eq 0 ]]; then
+        # Create lndbackup user if it doesn't exist
+        if ! getent passwd lndbackup >/dev/null; then
+            log_info "Creating lndbackup user..."
+            useradd --system --shell /bin/false --home-dir /var/lib/lndbackup \
+                    --create-home lndbackup
+        fi
+    fi
+}
+
 # Setup directories based on scope
 if [[ $EUID -eq 0 ]]; then
+    create_backup_user
     SYSTEMD_SCOPE="system"
     SYSTEMD_DIR="/etc/systemd/system"
-    SERVICE_USER="${SERVICE_USER:-lnd}"
+    SERVICE_USER="lndbackup"
     CONFIG_DIR="/etc/lnd-backup"
     CRED_DIR="/etc/credstore/lnd-backup"
     INSTALL_DIR="/usr/local/bin"
@@ -89,13 +103,95 @@ log_info "Installing LND Backup Monitor"
 log_info "Scope: $SYSTEMD_SCOPE"
 log_info "User: $SERVICE_USER"
 
-# Detect network
-NETWORK=$(detect_lnd_config)
+# Detect network (allow override from environment)
+if [[ -n "${NETWORK:-}" ]]; then
+    log_info "Using specified network: $NETWORK"
+else
+    NETWORK=$(detect_lnd_config)
+fi
 BACKUP_PATH=$(get_backup_path "$NETWORK")
 LND_DATA_DIR="${LND_DATA_DIR:-$HOME/.lnd}"
 
 log_info "Detected network: $NETWORK"
 log_info "Channel backup path: $BACKUP_PATH"
+
+# Check if we can access the backup path or its directory
+NEEDS_PERMISSION_SETUP=false
+if [[ -f "$BACKUP_PATH" ]]; then
+    if ! [[ -r "$BACKUP_PATH" ]]; then
+        log_warn "Cannot read channel backup file at $BACKUP_PATH"
+        NEEDS_PERMISSION_SETUP=true
+    fi
+elif [[ -d "$(dirname "$BACKUP_PATH")" ]]; then
+    if ! [[ -r "$(dirname "$BACKUP_PATH")" ]]; then
+        log_warn "Cannot access LND data directory"
+        NEEDS_PERMISSION_SETUP=true
+    fi
+else
+    # Check if parent directories exist but aren't accessible
+    PARENT_DIR="$LND_DATA_DIR"
+    if [[ -d "$PARENT_DIR" ]] && ! [[ -r "$PARENT_DIR/data" ]] 2>/dev/null; then
+        log_warn "LND data directory exists but is not accessible"
+        NEEDS_PERMISSION_SETUP=true
+    fi
+fi
+
+# Handle permission setup if needed
+if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
+    log_info "Setting up permissions for LND data access..."
+
+    # Create lndbackup group if it doesn't exist
+    if ! getent group lndbackup >/dev/null 2>&1; then
+        if [[ $EUID -eq 0 ]]; then
+            groupadd lndbackup
+        else
+            log_info "Creating lndbackup group (requires sudo)..."
+            sudo groupadd lndbackup || {
+                log_error "Failed to create lndbackup group"
+                log_info "You may need to manually set up permissions"
+            }
+        fi
+    fi
+
+    # Add service user to lndbackup group
+    if getent group lndbackup >/dev/null 2>&1; then
+        if [[ $EUID -eq 0 ]]; then
+            usermod -a -G lndbackup "$SERVICE_USER"
+        else
+            log_info "Adding $SERVICE_USER to lndbackup group (requires sudo)..."
+            sudo usermod -a -G lndbackup "$SERVICE_USER"
+        fi
+
+        # Try to set group permissions on LND data
+        if [[ -d "$LND_DATA_DIR/data" ]]; then
+            log_info "Setting group permissions on LND data (may require sudo)..."
+            if [[ $EUID -eq 0 ]]; then
+                chgrp -R lndbackup "$LND_DATA_DIR/data" 2>/dev/null && \
+                chmod -R g+rX "$LND_DATA_DIR/data" 2>/dev/null || \
+                log_warn "Could not set permissions - will use system service"
+            else
+                sudo chgrp -R lndbackup "$LND_DATA_DIR/data" 2>/dev/null && \
+                sudo chmod -R g+rX "$LND_DATA_DIR/data" 2>/dev/null || \
+                log_warn "Could not set permissions - will use system service"
+            fi
+        fi
+
+        # Force system service for permission handling
+        if [[ "$SYSTEMD_SCOPE" == "user" ]]; then
+            log_info "Switching to system service for permission handling..."
+            SYSTEMD_SCOPE="system"
+            SYSTEMD_DIR="/etc/systemd/system"
+            SERVICE_USER="${SERVICE_USER}"
+            CONFIG_DIR="/etc/lnd-backup"
+            CRED_DIR="/etc/lnd-backup/credentials"
+            INSTALL_DIR="/usr/local/bin"
+            WANTED_BY="multi-user.target"
+            USE_GROUP="lndbackup"
+            # Update venv path for system scope
+            VENV_DIR="/opt/lnd-backup-venv"
+        fi
+    fi
+fi
 
 # Check dependencies
 log_info "Checking dependencies..."
@@ -109,21 +205,52 @@ if ! command -v python3 &> /dev/null; then
     MISSING_DEPS+=("python3")
 fi
 
-if ! command -v pip3 &> /dev/null; then
-    MISSING_DEPS+=("python3-pip")
+if ! command -v curl &> /dev/null; then
+    MISSING_DEPS+=("curl")
 fi
 
 if [[ ${#MISSING_DEPS[@]} -gt 0 ]]; then
-    log_error "Missing dependencies: ${MISSING_DEPS[*]}"
+    log_warn "Missing dependencies: ${MISSING_DEPS[*]}"
     if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-        log_info "Install with: sudo apt install ${MISSING_DEPS[*]}"
+        log_info "Installing missing dependencies..."
+        if command -v apt &> /dev/null; then
+            sudo apt update && sudo apt install -y ${MISSING_DEPS[*]} || {
+                log_error "Failed to install dependencies"
+                exit 1
+            }
+        else
+            log_error "Package manager not found. Please install manually: ${MISSING_DEPS[*]}"
+            exit 1
+        fi
+    else
+        log_error "Unsupported OS. Please install manually: ${MISSING_DEPS[*]}"
+        exit 1
     fi
-    exit 1
 fi
 
-# Install Python dependencies
-log_info "Installing Python dependencies..."
-pip3 install --user -r "$SCRIPT_DIR/requirements.txt"
+# Set up venv path based on scope
+if [[ $EUID -eq 0 ]]; then
+    VENV_DIR="/opt/lnd-backup-venv"
+else
+    VENV_DIR="$HOME/.local/share/lnd-backup-venv"
+fi
+
+# Install uv if not available
+if ! command -v uv &> /dev/null; then
+    log_info "Installing uv package manager..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.cargo/bin:$PATH"
+fi
+
+# Create virtual environment and install Python dependencies
+log_info "Creating virtual environment at $VENV_DIR..."
+uv venv "$VENV_DIR"
+
+log_info "Installing Python dependencies in virtual environment..."
+"$VENV_DIR/bin/uv" pip install -r "$SCRIPT_DIR/requirements.txt" || {
+    log_error "Failed to install Python dependencies"
+    exit 1
+}
 
 # Create directories
 log_info "Creating directories..."
@@ -136,15 +263,59 @@ if [[ $EUID -eq 0 ]]; then
     chmod 700 "$CRED_DIR"
 fi
 
+
+# Validate storage connection string format
+validate_storage_connection() {
+    local conn="$1"
+    
+    if [[ "$conn" =~ ^dropbox: ]]; then
+        log_info "Valid Dropbox connection string format"
+    elif [[ "$conn" =~ ^azure://[^/]+\.blob\.core\.windows\.net/ ]]; then
+        # Check Azure permissions
+        if [[ ! "$conn" =~ sp=racwl ]]; then
+            log_error "Azure connection string has insufficient permissions"
+            log_error "Required permissions: sp=racwl (read, add, create, write, list)"
+            log_error "Current permissions: $(echo "$conn" | grep -o 'sp=[^&]*' || echo 'none found')"
+            return 1
+        fi
+        log_info "Valid Azure connection string format with proper permissions"
+    else
+        log_error "Invalid connection string format"
+        log_error "Supported formats:"
+        log_error "  dropbox:TOKEN"
+        log_error "  azure://account.blob.core.windows.net/container?sp=racwl&..."
+        log_error "Got: ${conn:0:50}..."
+        return 1
+    fi
+    
+    echo "$conn"
+}
+
 # Handle storage connection string
-if [[ -z "${STORAGE_CONNECTION_STRING:-}" ]]; then
-    log_warn "STORAGE_CONNECTION_STRING not set in environment"
-    echo "Supported formats:"
-    echo "  dropbox:TOKEN"
-    echo "  azure:CONNECTION_STRING"
-    echo
-    read -p "Enter your storage connection string: " STORAGE_CONNECTION_STRING
-fi
+while true; do
+    if [[ -z "${STORAGE_CONNECTION_STRING:-}" ]]; then
+        log_warn "STORAGE_CONNECTION_STRING not set in environment"
+        echo "Supported formats:"
+        echo "  dropbox:TOKEN"
+        echo "  azure://account.blob.core.windows.net/container?sp=racwl&..."
+        echo
+        read -p "Enter your storage connection string: " STORAGE_CONNECTION_STRING
+    fi
+    
+    # Fix Azure connection string format if needed
+    if [[ "$STORAGE_CONNECTION_STRING" =~ ^azure:https:// ]]; then
+        log_info "Converting Azure connection string to correct format..."
+        STORAGE_CONNECTION_STRING="${STORAGE_CONNECTION_STRING/azure:https:\/\//azure://}"
+    fi
+    
+    # Validate the connection string
+    if STORAGE_CONNECTION_STRING=$(validate_storage_connection "$STORAGE_CONNECTION_STRING"); then
+        break
+    else
+        log_error "Please enter a valid connection string"
+        STORAGE_CONNECTION_STRING=""
+    fi
+done
 
 # Store credentials securely
 if command -v systemd-creds &> /dev/null && systemctl --version | grep -q "systemd 24[6-9]\|systemd 25[0-9]"; then
@@ -183,11 +354,14 @@ log_info "Installing scripts..."
 cp "$SCRIPT_DIR/templates/lnd-backup-monitor.sh" "$INSTALL_DIR/lnd-backup-monitor"
 cp "$SCRIPT_DIR/backup.py" "$INSTALL_DIR/backup.py"
 cp "$SCRIPT_DIR/storage_providers.py" "$INSTALL_DIR/storage_providers.py"
-cp "$SCRIPT_DIR/dropbox_provider.py" "$INSTALL_DIR/dropbox_provider.py"
-cp "$SCRIPT_DIR/azure_provider.py" "$INSTALL_DIR/azure_provider.py"
 
-# Process and install wrapper script
+# Only copy provider files that exist
+[[ -f "$SCRIPT_DIR/dropbox_provider.py" ]] && cp "$SCRIPT_DIR/dropbox_provider.py" "$INSTALL_DIR/dropbox_provider.py"
+[[ -f "$SCRIPT_DIR/azure_provider.py" ]] && cp "$SCRIPT_DIR/azure_provider.py" "$INSTALL_DIR/azure_provider.py"
+
+# Process and install wrapper script with venv path
 sed -e "s|%INSTALL_DIR%|$INSTALL_DIR|g" \
+    -e "s|%VENV_DIR%|$VENV_DIR|g" \
     "$SCRIPT_DIR/templates/lnd-backup-wrapper.sh" > "$INSTALL_DIR/lnd-backup-wrapper"
 
 chmod +x "$INSTALL_DIR/lnd-backup-monitor"
@@ -196,20 +370,34 @@ chmod +x "$INSTALL_DIR/backup.py"
 
 # Process systemd service template
 if [[ $SYSTEMD_SCOPE == "system" ]]; then
-    USER_GROUP_SECTION="User=$SERVICE_USER
+    if [[ -n "${USE_GROUP:-}" ]]; then
+        USER_GROUP_SECTION="User=$SERVICE_USER
+Group=$USE_GROUP"
+    else
+        USER_GROUP_SECTION="User=$SERVICE_USER
 Group=$SERVICE_USER"
+    fi
 else
     USER_GROUP_SECTION=""
 fi
 
-sed -e "s|%NETWORK%|$NETWORK|g" \
-    -e "s|%INSTALL_DIR%|$INSTALL_DIR|g" \
-    -e "s|%CONFIG_DIR%|$CONFIG_DIR|g" \
-    -e "s|%LND_DATA_DIR%|$LND_DATA_DIR|g" \
-    -e "s|%WANTED_BY%|$WANTED_BY|g" \
-    -e "s|%USER_GROUP_SECTION%|$USER_GROUP_SECTION|g" \
-    -e "s|%CREDENTIAL_SECTION%|$CREDENTIAL_SECTION|g" \
-    "$SCRIPT_DIR/templates/lnd-backup.service" > "$SYSTEMD_DIR/lnd-backup.service"
+# Create temporary file for service
+cp "$SCRIPT_DIR/templates/lnd-backup.service" "$SYSTEMD_DIR/lnd-backup.service.tmp"
+
+# Process service template with safe replacements
+sed -i "s|%NETWORK%|$NETWORK|g" "$SYSTEMD_DIR/lnd-backup.service.tmp"
+sed -i "s|%INSTALL_DIR%|$INSTALL_DIR|g" "$SYSTEMD_DIR/lnd-backup.service.tmp"
+sed -i "s|%CONFIG_DIR%|$CONFIG_DIR|g" "$SYSTEMD_DIR/lnd-backup.service.tmp"
+sed -i "s|%LND_DATA_DIR%|$LND_DATA_DIR|g" "$SYSTEMD_DIR/lnd-backup.service.tmp"
+sed -i "s|%WANTED_BY%|$WANTED_BY|g" "$SYSTEMD_DIR/lnd-backup.service.tmp"
+
+# Handle multi-line replacements using awk
+awk -v user_group="$USER_GROUP_SECTION" -v cred="$CREDENTIAL_SECTION" \
+    '{gsub("%USER_GROUP_SECTION%", user_group); gsub("%CREDENTIAL_SECTION%", cred); print}' \
+    "$SYSTEMD_DIR/lnd-backup.service.tmp" > "$SYSTEMD_DIR/lnd-backup.service"
+
+# Clean up temp file
+rm -f "$SYSTEMD_DIR/lnd-backup.service.tmp"
 
 # Process and install uninstall script
 sed -e "s|%SYSTEMD_SCOPE%|$SYSTEMD_SCOPE|g" \

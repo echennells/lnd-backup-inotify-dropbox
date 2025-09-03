@@ -27,7 +27,7 @@ upload_backup() {
     # Set the staged backup file for the Python script to use
     export STAGED_BACKUP_FILE="$backup_file"
     
-    if python3 "$(dirname "$0")/backup.py"; then
+    if python "$(dirname "$0")/backup.py"; then
         echo "[$(date)] Backup uploaded successfully"
     else
         echo "[$(date)] ERROR: Backup upload failed"

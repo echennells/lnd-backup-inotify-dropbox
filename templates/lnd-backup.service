@@ -28,6 +28,9 @@ NoNewPrivileges=yes
 ReadWritePaths=%CONFIG_DIR% /tmp
 ReadOnlyPaths=%LND_DATA_DIR%
 
+# Group access for LND files
+SupplementaryGroups=lndbackup
+
 # Resource limits
 MemoryMax=256M
 CPUQuota=20%

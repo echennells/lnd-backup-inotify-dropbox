@@ -8,5 +8,8 @@ elif [[ -n "${CREDENTIALS_DIRECTORY:-}" ]] && [[ -f "${CREDENTIALS_DIRECTORY}/st
     export STORAGE_CONNECTION_STRING="$(cat "${CREDENTIALS_DIRECTORY}/storage.connection")"
 fi
 
+# Set Python path to use virtual environment
+export PATH="%VENV_DIR%/bin:$PATH"
+
 # Execute the actual monitor script
 exec %INSTALL_DIR%/lnd-backup-monitor "$@"
