@@ -4,11 +4,18 @@ set -euo pipefail
 # Load configuration
 source "${CONFIG_DIR}/config"
 
-# Validate storage connection string
+# Read storage connection string from systemd credential or environment
 if [[ -z "${STORAGE_CONNECTION_STRING:-}" ]]; then
-    echo "ERROR: STORAGE_CONNECTION_STRING environment variable is required"
-    exit 1
+    if [[ -n "${CREDENTIALS_DIRECTORY:-}" && -f "$CREDENTIALS_DIRECTORY/storage.connection" ]]; then
+        STORAGE_CONNECTION_STRING=$(cat "$CREDENTIALS_DIRECTORY/storage.connection")
+    else
+        echo "ERROR: STORAGE_CONNECTION_STRING environment variable or credential file is required"
+        exit 1
+    fi
 fi
+
+# Export for Python script
+export STORAGE_CONNECTION_STRING
 
 # Extract provider from connection string for logging
 PROVIDER=$(echo "$STORAGE_CONNECTION_STRING" | cut -d':' -f1)
