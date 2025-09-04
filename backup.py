@@ -23,8 +23,18 @@ SYSTEM_ID = os.getenv('SYSTEM_ID', '').strip() or socket.gethostname()
 def get_storage_config() -> dict:
     """Get storage provider configuration from environment variables"""
     connection_string = os.getenv('STORAGE_CONNECTION_STRING')
+
+    # Try to read from systemd credential file if env var not set
     if not connection_string:
-        raise ValueError("STORAGE_CONNECTION_STRING environment variable is required")
+        credentials_dir = os.getenv('CREDENTIALS_DIRECTORY')
+        if credentials_dir:
+            storage_connection_file = os.path.join(credentials_dir, 'storage.connection')
+            if os.path.exists(storage_connection_file):
+                with open(storage_connection_file, 'r') as f:
+                    connection_string = f.read().strip()
+
+    if not connection_string:
+        raise ValueError("STORAGE_CONNECTION_STRING environment variable or credential file is required")
     
     config = {
         'backup_dir': os.getenv('BACKUP_DIR', '/lightning-backups'),
@@ -52,7 +62,13 @@ def perform_backup(max_retries: int = 3) -> bool:
     try:
         config = get_storage_config()
         connection_string = config['connection_string']
-        provider = StorageProviderFactory.create_provider_from_connection_string(connection_string, config)
+        
+        # Use explicit provider type if set, otherwise try to parse connection string
+        provider_type = os.getenv('STORAGE_PROVIDER', '').strip()
+        if provider_type:
+            provider = StorageProviderFactory.create_provider(provider_type, config)
+        else:
+            provider = StorageProviderFactory.create_provider_from_connection_string(connection_string, config)
         
         with open(backup_file, 'rb') as f:
             file_contents = f.read()
@@ -88,12 +104,27 @@ def perform_backup(max_retries: int = 3) -> bool:
 def main():
     """Main function"""
     connection_string = os.getenv('STORAGE_CONNECTION_STRING')
+
+    # Try to read from systemd credential file if env var not set
+    if not connection_string:
+        credentials_dir = os.getenv('CREDENTIALS_DIRECTORY')
+        if credentials_dir:
+            storage_connection_file = os.path.join(credentials_dir, 'storage.connection')
+            if os.path.exists(storage_connection_file):
+                with open(storage_connection_file, 'r') as f:
+                    connection_string = f.read().strip()
+
     if connection_string:
-        from urllib.parse import urlparse
-        provider_name = urlparse(connection_string).scheme
+        # Check for explicit provider type first
+        provider_type = os.getenv('STORAGE_PROVIDER', '').strip()
+        if provider_type:
+            provider_name = provider_type
+        else:
+            from urllib.parse import urlparse
+            provider_name = urlparse(connection_string).scheme
         print(f"[{datetime.now()}] Starting channel backup using {provider_name} provider...")
     else:
-        print(f"[{datetime.now()}] ERROR: STORAGE_CONNECTION_STRING environment variable is required")
+        print(f"[{datetime.now()}] ERROR: STORAGE_CONNECTION_STRING environment variable or credential file is required")
         return 1
     
     backup_file = os.getenv('STAGED_BACKUP_FILE', LOCAL_FILE)
