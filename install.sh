@@ -14,6 +14,14 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Load .env file if it exists
+if [[ -f "$SCRIPT_DIR/.env" ]]; then
+    log_info "Loading environment from .env file..."
+    set -a
+    source "$SCRIPT_DIR/.env"
+    set +a
+fi
+
 # Detect LND configuration
 detect_lnd_config() {
     local lnd_dir="${LND_DATA_DIR:-$HOME/.lnd}"
@@ -70,11 +78,17 @@ get_backup_path() {
 # Create lndbackup user if running as root
 create_backup_user() {
     if [[ $EUID -eq 0 ]]; then
+        # Create lndbackup group if it doesn't exist
+        if ! getent group lndbackup >/dev/null; then
+            log_info "Creating lndbackup group..."
+            groupadd --system lndbackup
+        fi
+
         # Create lndbackup user if it doesn't exist
         if ! getent passwd lndbackup >/dev/null; then
             log_info "Creating lndbackup user..."
             useradd --system --shell /bin/false --home-dir /var/lib/lndbackup \
-                    --create-home lndbackup
+                    --create-home --gid lndbackup lndbackup
         fi
     fi
 }
@@ -239,7 +253,7 @@ fi
 if ! command -v uv &> /dev/null; then
     log_info "Installing uv package manager..."
     curl -LsSf https://astral.sh/uv/install.sh | sh
-    export PATH="$HOME/.cargo/bin:$PATH"
+    export PATH="$HOME/.local/bin:$PATH"
 fi
 
 # Create virtual environment and install Python dependencies
@@ -247,7 +261,7 @@ log_info "Creating virtual environment at $VENV_DIR..."
 uv venv "$VENV_DIR"
 
 log_info "Installing Python dependencies in virtual environment..."
-"$VENV_DIR/bin/uv" pip install -r "$SCRIPT_DIR/requirements.txt" || {
+uv pip install --python "$VENV_DIR/bin/python" -r "$SCRIPT_DIR/requirements.txt" || {
     log_error "Failed to install Python dependencies"
     exit 1
 }
@@ -326,7 +340,7 @@ if command -v systemd-creds &> /dev/null && systemctl --version | grep -q "syste
         chmod 600 "$CRED_DIR/storage.connection"
     }
     CREDENTIAL_SECTION="LoadCredential=storage.connection:$CRED_DIR/storage.connection
-Environment=\"CREDENTIALS_DIRECTORY=%d/credentials\""
+Environment=\"CREDENTIALS_DIRECTORY=%d\""
 else
     log_info "Storing connection string in restricted file..."
     echo -n "$STORAGE_CONNECTION_STRING" > "$CRED_DIR/storage.connection"
