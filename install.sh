@@ -239,6 +239,10 @@ if ! command -v curl &> /dev/null; then
     MISSING_DEPS+=("curl")
 fi
 
+if ! command -v setfacl &> /dev/null; then
+    MISSING_DEPS+=("acl")
+fi
+
 if [[ ${#MISSING_DEPS[@]} -gt 0 ]]; then
     log_warn "Missing dependencies: ${MISSING_DEPS[*]}"
     if [[ "$OSTYPE" == "linux-gnu"* ]]; then
