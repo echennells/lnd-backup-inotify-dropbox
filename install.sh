@@ -191,7 +191,9 @@ if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
                     log_info "Granting traverse permissions through $HOME_DIR..."
                     
                     # Grant only execute (traverse) permission, not read
-                    setfacl -m u:lndbackup:x "$HOME_DIR" 2>/dev/null || log_warn "Could not set ACL on $HOME_DIR"
+                    if ! setfacl -m u:lndbackup:x "$HOME_DIR" 2>&1; then
+                        log_warn "Could not set ACL on $HOME_DIR: $(setfacl -m u:lndbackup:x "$HOME_DIR" 2>&1 || echo 'unknown error')"
+                    fi
                     
                     # Grant traverse on intermediate directories if needed
                     CURRENT_PATH="$HOME_DIR"
@@ -200,7 +202,9 @@ if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
                     for dir in "${DIRS[@]}"; do
                         CURRENT_PATH="$CURRENT_PATH/$dir"
                         if [[ -d "$CURRENT_PATH" ]]; then
-                            setfacl -m u:lndbackup:x "$CURRENT_PATH" 2>/dev/null
+                            if ! setfacl -m u:lndbackup:x "$CURRENT_PATH" 2>&1; then
+                                log_warn "Could not set ACL on $CURRENT_PATH: $(setfacl -m u:lndbackup:x "$CURRENT_PATH" 2>&1 || echo 'unknown error')"
+                            fi
                         fi
                     done
                 fi
@@ -208,8 +212,9 @@ if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
                 # Set default ACL so new files created by LND are readable by lndbackup group
                 for network_dir in "$LND_DATA_DIR"/data/chain/bitcoin/*/; do
                     if [[ -d "$network_dir" ]]; then
-                        setfacl -d -m g:lndbackup:r "$network_dir" 2>/dev/null || \
-                            log_warn "Could not set default ACL on $network_dir"
+                        if ! setfacl -d -m g:lndbackup:r "$network_dir" 2>&1; then
+                            log_warn "Could not set default ACL on $network_dir: $(setfacl -d -m g:lndbackup:r "$network_dir" 2>&1 || echo 'unknown error')"
+                        fi
                     fi
                 done
             else
@@ -224,7 +229,9 @@ if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
                     log_info "Granting traverse permissions through $HOME_DIR..."
                     
                     # Grant only execute (traverse) permission, not read
-                    sudo setfacl -m u:lndbackup:x "$HOME_DIR" 2>/dev/null || log_warn "Could not set ACL on $HOME_DIR"
+                    if ! sudo setfacl -m u:lndbackup:x "$HOME_DIR" 2>&1; then
+                        log_warn "Could not set ACL on $HOME_DIR: $(sudo setfacl -m u:lndbackup:x "$HOME_DIR" 2>&1 || echo 'unknown error')"
+                    fi
                     
                     # Grant traverse on intermediate directories if needed
                     CURRENT_PATH="$HOME_DIR"
@@ -233,7 +240,9 @@ if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
                     for dir in "${DIRS[@]}"; do
                         CURRENT_PATH="$CURRENT_PATH/$dir"
                         if [[ -d "$CURRENT_PATH" ]]; then
-                            sudo setfacl -m u:lndbackup:x "$CURRENT_PATH" 2>/dev/null
+                            if ! sudo setfacl -m u:lndbackup:x "$CURRENT_PATH" 2>&1; then
+                                log_warn "Could not set ACL on $CURRENT_PATH: $(sudo setfacl -m u:lndbackup:x "$CURRENT_PATH" 2>&1 || echo 'unknown error')"
+                            fi
                         fi
                     done
                 fi
@@ -241,8 +250,9 @@ if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
                 # Set default ACL so new files created by LND are readable by lndbackup group
                 for network_dir in "$LND_DATA_DIR"/data/chain/bitcoin/*/; do
                     if [[ -d "$network_dir" ]]; then
-                        sudo setfacl -d -m g:lndbackup:r "$network_dir" 2>/dev/null || \
-                            log_warn "Could not set default ACL on $network_dir"
+                        if ! sudo setfacl -d -m g:lndbackup:r "$network_dir" 2>&1; then
+                            log_warn "Could not set default ACL on $network_dir: $(sudo setfacl -d -m g:lndbackup:r "$network_dir" 2>&1 || echo 'unknown error')"
+                        fi
                     fi
                 done
             fi
