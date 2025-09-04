@@ -7,9 +7,9 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
-log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+log_info() { echo -e "${GREEN}[INFO]${NC} $1" >&2; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $1" >&2; }
+log_error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -184,25 +184,67 @@ if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
                 chmod -R g+rX "$LND_DATA_DIR/data" 2>/dev/null || \
                 log_warn "Could not set permissions - will use system service"
                 
-                # Set default ACL so new files are readable by lndbackup group
-                NETWORK_DIR="$LND_DATA_DIR/data/chain/bitcoin/$NETWORK"
-                if [[ -d "$NETWORK_DIR" ]]; then
-                    setfacl -d -m g:lndbackup:r "$NETWORK_DIR" 2>/dev/null && \
-                    log_info "Set default ACL for new files in $NETWORK_DIR" || \
-                    log_warn "Could not set default ACL - files created by LND may not be readable"
+                # If LND_DATA_DIR is under a home directory, grant traverse permission
+                if [[ "$LND_DATA_DIR" =~ ^/home/ ]]; then
+                    # Extract the home directory path (e.g., /home/ubuntu from /home/ubuntu/volumes/.lnd)
+                    HOME_DIR=$(echo "$LND_DATA_DIR" | grep -oE "^/home/[^/]+")
+                    log_info "Granting traverse permissions through $HOME_DIR..."
+                    
+                    # Grant only execute (traverse) permission, not read
+                    setfacl -m u:lndbackup:x "$HOME_DIR" 2>/dev/null || log_warn "Could not set ACL on $HOME_DIR"
+                    
+                    # Grant traverse on intermediate directories if needed
+                    CURRENT_PATH="$HOME_DIR"
+                    REMAINING_PATH="${LND_DATA_DIR#$HOME_DIR/}"
+                    IFS='/' read -ra DIRS <<< "$REMAINING_PATH"
+                    for dir in "${DIRS[@]}"; do
+                        CURRENT_PATH="$CURRENT_PATH/$dir"
+                        if [[ -d "$CURRENT_PATH" ]]; then
+                            setfacl -m u:lndbackup:x "$CURRENT_PATH" 2>/dev/null
+                        fi
+                    done
                 fi
+                
+                # Set default ACL so new files created by LND are readable by lndbackup group
+                for network_dir in "$LND_DATA_DIR"/data/chain/bitcoin/*/; do
+                    if [[ -d "$network_dir" ]]; then
+                        setfacl -d -m g:lndbackup:r "$network_dir" 2>/dev/null || \
+                            log_warn "Could not set default ACL on $network_dir"
+                    fi
+                done
             else
                 sudo chgrp -R lndbackup "$LND_DATA_DIR/data" 2>/dev/null && \
                 sudo chmod -R g+rX "$LND_DATA_DIR/data" 2>/dev/null || \
                 log_warn "Could not set permissions - will use system service"
                 
-                # Set default ACL so new files are readable by lndbackup group
-                NETWORK_DIR="$LND_DATA_DIR/data/chain/bitcoin/$NETWORK"
-                if [[ -d "$NETWORK_DIR" ]]; then
-                    sudo setfacl -d -m g:lndbackup:r "$NETWORK_DIR" 2>/dev/null && \
-                    log_info "Set default ACL for new files in $NETWORK_DIR" || \
-                    log_warn "Could not set default ACL - files created by LND may not be readable"
+                # If LND_DATA_DIR is under a home directory, grant traverse permission
+                if [[ "$LND_DATA_DIR" =~ ^/home/ ]]; then
+                    # Extract the home directory path (e.g., /home/ubuntu from /home/ubuntu/volumes/.lnd)
+                    HOME_DIR=$(echo "$LND_DATA_DIR" | grep -oE "^/home/[^/]+")
+                    log_info "Granting traverse permissions through $HOME_DIR..."
+                    
+                    # Grant only execute (traverse) permission, not read
+                    sudo setfacl -m u:lndbackup:x "$HOME_DIR" 2>/dev/null || log_warn "Could not set ACL on $HOME_DIR"
+                    
+                    # Grant traverse on intermediate directories if needed
+                    CURRENT_PATH="$HOME_DIR"
+                    REMAINING_PATH="${LND_DATA_DIR#$HOME_DIR/}"
+                    IFS='/' read -ra DIRS <<< "$REMAINING_PATH"
+                    for dir in "${DIRS[@]}"; do
+                        CURRENT_PATH="$CURRENT_PATH/$dir"
+                        if [[ -d "$CURRENT_PATH" ]]; then
+                            sudo setfacl -m u:lndbackup:x "$CURRENT_PATH" 2>/dev/null
+                        fi
+                    done
                 fi
+                
+                # Set default ACL so new files created by LND are readable by lndbackup group
+                for network_dir in "$LND_DATA_DIR"/data/chain/bitcoin/*/; do
+                    if [[ -d "$network_dir" ]]; then
+                        sudo setfacl -d -m g:lndbackup:r "$network_dir" 2>/dev/null || \
+                            log_warn "Could not set default ACL on $network_dir"
+                    fi
+                done
             fi
         fi
 
