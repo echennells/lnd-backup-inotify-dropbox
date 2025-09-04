@@ -183,10 +183,26 @@ if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
                 chgrp -R lndbackup "$LND_DATA_DIR/data" 2>/dev/null && \
                 chmod -R g+rX "$LND_DATA_DIR/data" 2>/dev/null || \
                 log_warn "Could not set permissions - will use system service"
+                
+                # Set default ACL so new files are readable by lndbackup group
+                NETWORK_DIR="$LND_DATA_DIR/data/chain/bitcoin/$NETWORK"
+                if [[ -d "$NETWORK_DIR" ]]; then
+                    setfacl -d -m g:lndbackup:r "$NETWORK_DIR" 2>/dev/null && \
+                    log_info "Set default ACL for new files in $NETWORK_DIR" || \
+                    log_warn "Could not set default ACL - files created by LND may not be readable"
+                fi
             else
                 sudo chgrp -R lndbackup "$LND_DATA_DIR/data" 2>/dev/null && \
                 sudo chmod -R g+rX "$LND_DATA_DIR/data" 2>/dev/null || \
                 log_warn "Could not set permissions - will use system service"
+                
+                # Set default ACL so new files are readable by lndbackup group
+                NETWORK_DIR="$LND_DATA_DIR/data/chain/bitcoin/$NETWORK"
+                if [[ -d "$NETWORK_DIR" ]]; then
+                    sudo setfacl -d -m g:lndbackup:r "$NETWORK_DIR" 2>/dev/null && \
+                    log_info "Set default ACL for new files in $NETWORK_DIR" || \
+                    log_warn "Could not set default ACL - files created by LND may not be readable"
+                fi
             fi
         fi
 
