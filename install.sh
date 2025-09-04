@@ -411,7 +411,7 @@ if command -v systemd-creds &> /dev/null && systemctl --version | grep -q "syste
         echo -n "$STORAGE_CONNECTION_STRING" > "$CRED_DIR/storage.connection"
         chmod 600 "$CRED_DIR/storage.connection"
     }
-    CREDENTIAL_SECTION="LoadCredential=storage.connection:$CRED_DIR/storage.connection
+    CREDENTIAL_SECTION="LoadCredentialEncrypted=storage.connection:$CRED_DIR/storage.connection
 Environment=\"CREDENTIALS_DIRECTORY=%d\""
 else
     log_info "Storing connection string in restricted file..."
