@@ -22,8 +22,10 @@ if [[ -f "$SCRIPT_DIR/.env" ]]; then
     source "$SCRIPT_DIR/.env"
     set +a
     log_info "Environment variables loaded from .env file"
-elif [[ -f "$SCRIPT_DIR/.env.example" ]]; then
-    log_info "No .env file found, but .env.example exists. Copy it to .env and configure STORAGE_CONNECTION_STRING"
+else
+    if [[ -f "$SCRIPT_DIR/.env.example" ]]; then
+        log_info "No .env file found, but .env.example exists. Copy it to .env and configure STORAGE_CONNECTION_STRING"
+    fi
 fi
 
 # Detect LND configuration
@@ -310,7 +312,6 @@ if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
             # Update venv path for system scope
             VENV_DIR="/opt/lnd-backup-venv"
         fi
-    fi
 fi
 
 # Check dependencies
