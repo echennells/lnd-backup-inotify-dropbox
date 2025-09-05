@@ -143,23 +143,44 @@ log_info "Detected network: $NETWORK"
 log_info "Channel backup path: $BACKUP_PATH"
 
 # Check if we can access the backup path or its directory
+# NOTE: We need to check accessibility for the SERVICE_USER (lndbackup), not current user
 NEEDS_PERMISSION_SETUP=false
 if [[ -f "$BACKUP_PATH" ]]; then
-    if ! [[ -r "$BACKUP_PATH" ]]; then
+    if [[ $EUID -eq 0 ]] && [[ "$SERVICE_USER" != "$USER" ]]; then
+        # When running as root but service will run as different user, check if that user can access
+        if ! sudo -u "$SERVICE_USER" test -r "$BACKUP_PATH" 2>/dev/null; then
+            log_warn "Service user ($SERVICE_USER) cannot read channel backup file at $BACKUP_PATH"
+            NEEDS_PERMISSION_SETUP=true
+        fi
+    elif ! [[ -r "$BACKUP_PATH" ]]; then
         log_warn "Cannot read channel backup file at $BACKUP_PATH"
         NEEDS_PERMISSION_SETUP=true
     fi
 elif [[ -d "$(dirname "$BACKUP_PATH")" ]]; then
-    if ! [[ -r "$(dirname "$BACKUP_PATH")" ]]; then
+    if [[ $EUID -eq 0 ]] && [[ "$SERVICE_USER" != "$USER" ]]; then
+        # When running as root but service will run as different user, check if that user can access
+        if ! sudo -u "$SERVICE_USER" test -r "$(dirname "$BACKUP_PATH")" 2>/dev/null; then
+            log_warn "Service user ($SERVICE_USER) cannot access LND data directory at $(dirname "$BACKUP_PATH")"
+            NEEDS_PERMISSION_SETUP=true
+        fi
+    elif ! [[ -r "$(dirname "$BACKUP_PATH")" ]]; then
         log_warn "Cannot access LND data directory"
         NEEDS_PERMISSION_SETUP=true
     fi
 else
     # Check if parent directories exist but aren't accessible
     PARENT_DIR="$LND_DATA_DIR"
-    if [[ -d "$PARENT_DIR" ]] && ! [[ -r "$PARENT_DIR/data" ]] 2>/dev/null; then
-        log_warn "LND data directory exists but is not accessible"
-        NEEDS_PERMISSION_SETUP=true
+    if [[ -d "$PARENT_DIR" ]]; then
+        if [[ $EUID -eq 0 ]] && [[ "$SERVICE_USER" != "$USER" ]]; then
+            # Check if service user can access the data subdirectory
+            if ! sudo -u "$SERVICE_USER" test -r "$PARENT_DIR/data" 2>/dev/null; then
+                log_warn "Service user ($SERVICE_USER) cannot access LND data directory at $PARENT_DIR/data"
+                NEEDS_PERMISSION_SETUP=true
+            fi
+        elif ! [[ -r "$PARENT_DIR/data" ]] 2>/dev/null; then
+            log_warn "LND data directory exists but is not accessible"
+            NEEDS_PERMISSION_SETUP=true
+        fi
     fi
 fi
 
