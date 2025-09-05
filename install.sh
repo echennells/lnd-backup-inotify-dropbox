@@ -17,9 +17,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Load .env file if it exists
 if [[ -f "$SCRIPT_DIR/.env" ]]; then
     log_info "Loading environment from .env file..."
+    # Use set -a/+a to export all variables defined in .env
     set -a
     source "$SCRIPT_DIR/.env"
     set +a
+    log_info "Environment variables loaded from .env file"
+elif [[ -f "$SCRIPT_DIR/.env.example" ]]; then
+    log_info "No .env file found, but .env.example exists. Copy it to .env and configure STORAGE_CONNECTION_STRING"
 fi
 
 # Detect LND configuration
@@ -79,18 +83,25 @@ get_backup_path() {
 create_backup_user() {
     if [[ $EUID -eq 0 ]]; then
         # Create lndbackup group if it doesn't exist
-        if ! getent group lndbackup >/dev/null; then
+        if ! getent group lndbackup >/dev/null 2>&1; then
             log_info "Creating lndbackup group..."
-            groupadd --system lndbackup
+            if ! groupadd --system lndbackup; then
+                log_error "Failed to create lndbackup group"
+                return 1
+            fi
         fi
 
         # Create lndbackup user if it doesn't exist
-        if ! getent passwd lndbackup >/dev/null; then
+        if ! getent passwd lndbackup >/dev/null 2>&1; then
             log_info "Creating lndbackup user..."
-            useradd --system --shell /bin/false --home-dir /var/lib/lndbackup \
-                    --create-home --gid lndbackup lndbackup
+            if ! useradd --system --shell /bin/false --home-dir /var/lib/lndbackup \
+                        --create-home --gid lndbackup lndbackup; then
+                log_error "Failed to create lndbackup user"
+                return 1
+            fi
         fi
     fi
+    return 0
 }
 
 # Setup directories based on scope
@@ -167,34 +178,44 @@ if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
         fi
     fi
 
-    # Add service user to lndbackup group
-    if getent group lndbackup >/dev/null 2>&1; then
-        if [[ $EUID -eq 0 ]]; then
-            usermod -a -G lndbackup "$SERVICE_USER"
-        else
-            log_info "Adding $SERVICE_USER to lndbackup group (requires sudo)..."
-            sudo usermod -a -G lndbackup "$SERVICE_USER"
+        # Add service user to lndbackup group (usermod -a handles existing membership)
+        if getent group lndbackup >/dev/null 2>&1; then
+            if [[ $EUID -eq 0 ]]; then
+                usermod -a -G lndbackup "$SERVICE_USER" && log_info "Added $SERVICE_USER to lndbackup group"
+            else
+                log_info "Adding $SERVICE_USER to lndbackup group (requires sudo)..."
+                sudo usermod -a -G lndbackup "$SERVICE_USER" && log_info "Added $SERVICE_USER to lndbackup group"
+            fi
         fi
 
         # Try to set group permissions on LND data
         if [[ -d "$LND_DATA_DIR/data" ]]; then
             log_info "Setting group permissions on LND data (may require sudo)..."
+            PERMISSION_SUCCESS=true
+
             if [[ $EUID -eq 0 ]]; then
-                chgrp -R lndbackup "$LND_DATA_DIR/data" 2>/dev/null && \
-                chmod -R g+rX "$LND_DATA_DIR/data" 2>/dev/null || \
-                log_warn "Could not set permissions - will use system service"
-                
+                if ! chgrp -R lndbackup "$LND_DATA_DIR/data"; then
+                    log_error "Failed to set group ownership on $LND_DATA_DIR/data"
+                    PERMISSION_SUCCESS=false
+                fi
+
+                if ! chmod -R g+rX "$LND_DATA_DIR/data"; then
+                    log_error "Failed to set group permissions on $LND_DATA_DIR/data"
+                    PERMISSION_SUCCESS=false
+                fi
+
                 # If LND_DATA_DIR is under a home directory, grant traverse permission
                 if [[ "$LND_DATA_DIR" =~ ^/home/ ]]; then
                     # Extract the home directory path (e.g., /home/ubuntu from /home/ubuntu/volumes/.lnd)
                     HOME_DIR=$(echo "$LND_DATA_DIR" | grep -oE "^/home/[^/]+")
                     log_info "Granting traverse permissions through $HOME_DIR..."
-                    
+
                     # Grant only execute (traverse) permission, not read
-                    if ! setfacl -m u:lndbackup:x "$HOME_DIR" 2>&1; then
-                        log_warn "Could not set ACL on $HOME_DIR: $(setfacl -m u:lndbackup:x "$HOME_DIR" 2>&1 || echo 'unknown error')"
+                    if ! setfacl -m u:lndbackup:x "$HOME_DIR"; then
+                        log_error "Failed to set ACL traverse permission on $HOME_DIR"
+                        PERMISSION_SUCCESS=false
                     fi
-                    
+
                     # Grant traverse on intermediate directories if needed
                     CURRENT_PATH="$HOME_DIR"
                     REMAINING_PATH="${LND_DATA_DIR#$HOME_DIR/}"
@@ -202,37 +223,46 @@ if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
                     for dir in "${DIRS[@]}"; do
                         CURRENT_PATH="$CURRENT_PATH/$dir"
                         if [[ -d "$CURRENT_PATH" ]]; then
-                            if ! setfacl -m u:lndbackup:x "$CURRENT_PATH" 2>&1; then
-                                log_warn "Could not set ACL on $CURRENT_PATH: $(setfacl -m u:lndbackup:x "$CURRENT_PATH" 2>&1 || echo 'unknown error')"
+                            if ! setfacl -m u:lndbackup:x "$CURRENT_PATH"; then
+                                log_error "Failed to set ACL traverse permission on $CURRENT_PATH"
+                                PERMISSION_SUCCESS=false
                             fi
                         fi
                     done
                 fi
-                
+
                 # Set default ACL so new files created by LND are readable by lndbackup group
                 for network_dir in "$LND_DATA_DIR"/data/chain/bitcoin/*/; do
                     if [[ -d "$network_dir" ]]; then
-                        if ! setfacl -d -m g:lndbackup:r "$network_dir" 2>&1; then
-                            log_warn "Could not set default ACL on $network_dir: $(setfacl -d -m g:lndbackup:r "$network_dir" 2>&1 || echo 'unknown error')"
+                        if ! setfacl -d -m g:lndbackup:r "$network_dir"; then
+                            log_error "Failed to set default ACL on $network_dir"
+                            PERMISSION_SUCCESS=false
                         fi
                     fi
                 done
             else
-                sudo chgrp -R lndbackup "$LND_DATA_DIR/data" 2>/dev/null && \
-                sudo chmod -R g+rX "$LND_DATA_DIR/data" 2>/dev/null || \
-                log_warn "Could not set permissions - will use system service"
-                
+                if ! sudo chgrp -R lndbackup "$LND_DATA_DIR/data"; then
+                    log_error "Failed to set group ownership on $LND_DATA_DIR/data (sudo required)"
+                    PERMISSION_SUCCESS=false
+                fi
+
+                if ! sudo chmod -R g+rX "$LND_DATA_DIR/data"; then
+                    log_error "Failed to set group permissions on $LND_DATA_DIR/data (sudo required)"
+                    PERMISSION_SUCCESS=false
+                fi
+
                 # If LND_DATA_DIR is under a home directory, grant traverse permission
                 if [[ "$LND_DATA_DIR" =~ ^/home/ ]]; then
                     # Extract the home directory path (e.g., /home/ubuntu from /home/ubuntu/volumes/.lnd)
                     HOME_DIR=$(echo "$LND_DATA_DIR" | grep -oE "^/home/[^/]+")
                     log_info "Granting traverse permissions through $HOME_DIR..."
-                    
+
                     # Grant only execute (traverse) permission, not read
-                    if ! sudo setfacl -m u:lndbackup:x "$HOME_DIR" 2>&1; then
-                        log_warn "Could not set ACL on $HOME_DIR: $(sudo setfacl -m u:lndbackup:x "$HOME_DIR" 2>&1 || echo 'unknown error')"
+                    if ! sudo setfacl -m u:lndbackup:x "$HOME_DIR"; then
+                        log_error "Failed to set ACL traverse permission on $HOME_DIR"
+                        PERMISSION_SUCCESS=false
                     fi
-                    
+
                     # Grant traverse on intermediate directories if needed
                     CURRENT_PATH="$HOME_DIR"
                     REMAINING_PATH="${LND_DATA_DIR#$HOME_DIR/}"
@@ -240,21 +270,29 @@ if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
                     for dir in "${DIRS[@]}"; do
                         CURRENT_PATH="$CURRENT_PATH/$dir"
                         if [[ -d "$CURRENT_PATH" ]]; then
-                            if ! sudo setfacl -m u:lndbackup:x "$CURRENT_PATH" 2>&1; then
-                                log_warn "Could not set ACL on $CURRENT_PATH: $(sudo setfacl -m u:lndbackup:x "$CURRENT_PATH" 2>&1 || echo 'unknown error')"
+                            if ! sudo setfacl -m u:lndbackup:x "$CURRENT_PATH"; then
+                                log_error "Failed to set ACL traverse permission on $CURRENT_PATH"
+                                PERMISSION_SUCCESS=false
                             fi
                         fi
                     done
                 fi
-                
+
                 # Set default ACL so new files created by LND are readable by lndbackup group
                 for network_dir in "$LND_DATA_DIR"/data/chain/bitcoin/*/; do
                     if [[ -d "$network_dir" ]]; then
-                        if ! sudo setfacl -d -m g:lndbackup:r "$network_dir" 2>&1; then
-                            log_warn "Could not set default ACL on $network_dir: $(sudo setfacl -d -m g:lndbackup:r "$network_dir" 2>&1 || echo 'unknown error')"
+                        if ! sudo setfacl -d -m g:lndbackup:r "$network_dir"; then
+                            log_error "Failed to set default ACL on $network_dir"
+                            PERMISSION_SUCCESS=false
                         fi
                     fi
                 done
+            fi
+
+            if [[ "$PERMISSION_SUCCESS" != "true" ]]; then
+                log_error "Critical permission setup failed - manual intervention required"
+                log_error "Please check that you have sudo permissions and proper directory access"
+                exit 1
             fi
         fi
 
@@ -263,7 +301,7 @@ if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
             log_info "Switching to system service for permission handling..."
             SYSTEMD_SCOPE="system"
             SYSTEMD_DIR="/etc/systemd/system"
-            SERVICE_USER="${SERVICE_USER}"
+            SERVICE_USER="lndbackup"
             CONFIG_DIR="/etc/lnd-backup"
             CRED_DIR="/etc/lnd-backup/credentials"
             INSTALL_DIR="/usr/local/bin"
@@ -310,6 +348,18 @@ if [[ ${#MISSING_DEPS[@]} -gt 0 ]]; then
         fi
     else
         log_error "Unsupported OS. Please install manually: ${MISSING_DEPS[*]}"
+        exit 1
+    fi
+fi
+
+# Check Python version
+if command -v python3 &> /dev/null; then
+    PYTHON_VERSION=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
+    log_info "Python version: $PYTHON_VERSION"
+    if python3 -c 'import sys; sys.exit(1) if sys.version_info < (3, 8) else sys.exit(0)'; then
+        log_info "Python version >= 3.8 - OK"
+    else
+        log_error "Python 3.8 or higher is required, found $PYTHON_VERSION"
         exit 1
     fi
 fi
@@ -380,20 +430,30 @@ validate_storage_connection() {
 # Handle storage connection string
 while true; do
     if [[ -z "${STORAGE_CONNECTION_STRING:-}" ]]; then
-        log_warn "STORAGE_CONNECTION_STRING not set in environment"
+        # Provide more helpful debug information
+        if [[ -f "$SCRIPT_DIR/.env" ]]; then
+            log_warn "STORAGE_CONNECTION_STRING not set - check your .env file at $SCRIPT_DIR/.env"
+            log_info "Make sure STORAGE_CONNECTION_STRING is properly defined in .env (not commented out)"
+        elif [[ -f "$SCRIPT_DIR/.env.example" ]]; then
+            log_warn "STORAGE_CONNECTION_STRING not set - copy .env.example to .env and set STORAGE_CONNECTION_STRING"
+            log_info "Run: cp $SCRIPT_DIR/.env.example $SCRIPT_DIR/.env"
+        else
+            log_warn "STORAGE_CONNECTION_STRING not set in environment"
+        fi
+
         echo "Supported formats:"
         echo "  dropbox:TOKEN"
         echo "  azure://account.blob.core.windows.net/container?sp=racwl&..."
         echo
         read -p "Enter your storage connection string: " STORAGE_CONNECTION_STRING
     fi
-    
+
     # Fix Azure connection string format if needed
     if [[ "$STORAGE_CONNECTION_STRING" =~ ^azure:https:// ]]; then
         log_info "Converting Azure connection string to correct format..."
         STORAGE_CONNECTION_STRING="${STORAGE_CONNECTION_STRING/azure:https:\/\//azure://}"
     fi
-    
+
     # Validate the connection string
     if STORAGE_CONNECTION_STRING=$(validate_storage_connection "$STORAGE_CONNECTION_STRING"); then
         break
@@ -509,6 +569,7 @@ echo
 echo "Configuration: $CONFIG_DIR/config"
 echo "Service: $SYSTEMD_DIR/lnd-backup.service"
 echo "Network: $NETWORK"
+echo "Scope: $SYSTEMD_SCOPE"
 echo
 echo "To start the service:"
 if [[ $SYSTEMD_SCOPE == "system" ]]; then
@@ -520,6 +581,11 @@ else
     echo "  systemctl --user status lnd-backup"
     echo "  journalctl --user -fu lnd-backup"
 fi
+echo
+echo "Important notes:"
+echo "- If permission setup was required, you may need to log out and back in for group changes to take effect"
+echo "- Ensure your storage provider credentials are properly configured"
+echo "- Check the service logs if backups don't work as expected"
 echo
 echo "To uninstall:"
 echo "  $CONFIG_DIR/uninstall.sh"
