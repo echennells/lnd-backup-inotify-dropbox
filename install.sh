@@ -300,6 +300,15 @@ if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
                             log_error "Failed to set default ACL on $network_dir"
                             PERMISSION_SUCCESS=false
                         fi
+                        
+                        # Set ACL on existing channel.backup file if it exists
+                        if [[ -f "$network_dir/channel.backup" ]]; then
+                            log_info "Setting ACL on existing channel.backup in $network_dir"
+                            if ! setfacl -m u:lndbackup:r "$network_dir/channel.backup"; then
+                                log_error "Failed to set ACL on existing $network_dir/channel.backup"
+                                PERMISSION_SUCCESS=false
+                            fi
+                        fi
                     fi
                 done
             else
@@ -346,6 +355,15 @@ if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
                         if ! sudo setfacl -d -m g:lndbackup:r "$network_dir"; then
                             log_error "Failed to set default ACL on $network_dir"
                             PERMISSION_SUCCESS=false
+                        fi
+                        
+                        # Set ACL on existing channel.backup file if it exists
+                        if [[ -f "$network_dir/channel.backup" ]]; then
+                            log_info "Setting ACL on existing channel.backup in $network_dir"
+                            if ! sudo setfacl -m u:lndbackup:r "$network_dir/channel.backup"; then
+                                log_error "Failed to set ACL on existing $network_dir/channel.backup"
+                                PERMISSION_SUCCESS=false
+                            fi
                         fi
                     fi
                 done
