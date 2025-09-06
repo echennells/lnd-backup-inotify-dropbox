@@ -1,12 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
-# Load storage connection string from file if needed
-if [[ -n "${STORAGE_CONNECTION_STRING_FILE:-}" ]] && [[ -f "${STORAGE_CONNECTION_STRING_FILE}" ]]; then
-    export STORAGE_CONNECTION_STRING="$(cat "${STORAGE_CONNECTION_STRING_FILE}")"
-elif [[ -n "${CREDENTIALS_DIRECTORY:-}" ]] && [[ -f "${CREDENTIALS_DIRECTORY}/storage.connection" ]]; then
-    export STORAGE_CONNECTION_STRING="$(cat "${CREDENTIALS_DIRECTORY}/storage.connection")"
-fi
+# DO NOT read credentials here!
+# Python will securely read from either:
+# - CREDENTIALS_DIRECTORY (systemd LoadCredential)
+# - STORAGE_CONNECTION_STRING_FILE (fallback for older systemd)
+# This keeps secrets out of shell environment variables
 
 # Set Python path to use virtual environment
 export PATH="%VENV_DIR%/bin:$PATH"

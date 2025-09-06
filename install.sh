@@ -184,6 +184,45 @@ else
     fi
 fi
 
+# Check dependencies BEFORE trying to use them
+log_info "Checking dependencies..."
+MISSING_DEPS=()
+
+if ! command -v inotifywait &> /dev/null; then
+    MISSING_DEPS+=("inotify-tools")
+fi
+
+if ! command -v python3 &> /dev/null; then
+    MISSING_DEPS+=("python3")
+fi
+
+if ! command -v curl &> /dev/null; then
+    MISSING_DEPS+=("curl")
+fi
+
+if ! command -v setfacl &> /dev/null; then
+    MISSING_DEPS+=("acl")
+fi
+
+if [[ ${#MISSING_DEPS[@]} -gt 0 ]]; then
+    log_warn "Missing dependencies: ${MISSING_DEPS[*]}"
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        log_info "Installing missing dependencies..."
+        if command -v apt &> /dev/null; then
+            sudo apt update && sudo apt install -y ${MISSING_DEPS[*]} || {
+                log_error "Failed to install dependencies"
+                exit 1
+            }
+        else
+            log_error "Package manager not found. Please install manually: ${MISSING_DEPS[*]}"
+            exit 1
+        fi
+    else
+        log_error "Unsupported OS. Please install manually: ${MISSING_DEPS[*]}"
+        exit 1
+    fi
+fi
+
 # Handle permission setup if needed
 if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
     log_info "Setting up permissions for LND data access..."
@@ -335,44 +374,6 @@ if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
         fi
 fi
 
-# Check dependencies
-log_info "Checking dependencies..."
-MISSING_DEPS=()
-
-if ! command -v inotifywait &> /dev/null; then
-    MISSING_DEPS+=("inotify-tools")
-fi
-
-if ! command -v python3 &> /dev/null; then
-    MISSING_DEPS+=("python3")
-fi
-
-if ! command -v curl &> /dev/null; then
-    MISSING_DEPS+=("curl")
-fi
-
-if ! command -v setfacl &> /dev/null; then
-    MISSING_DEPS+=("acl")
-fi
-
-if [[ ${#MISSING_DEPS[@]} -gt 0 ]]; then
-    log_warn "Missing dependencies: ${MISSING_DEPS[*]}"
-    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-        log_info "Installing missing dependencies..."
-        if command -v apt &> /dev/null; then
-            sudo apt update && sudo apt install -y ${MISSING_DEPS[*]} || {
-                log_error "Failed to install dependencies"
-                exit 1
-            }
-        else
-            log_error "Package manager not found. Please install manually: ${MISSING_DEPS[*]}"
-            exit 1
-        fi
-    else
-        log_error "Unsupported OS. Please install manually: ${MISSING_DEPS[*]}"
-        exit 1
-    fi
-fi
 
 # Check Python version
 if command -v python3 &> /dev/null; then

@@ -26,11 +26,19 @@ def get_storage_config() -> dict:
 
     # Try to read from systemd credential file if env var not set
     if not connection_string:
+        # Method 1: systemd LoadCredential (most secure)
         credentials_dir = os.getenv('CREDENTIALS_DIRECTORY')
         if credentials_dir:
             storage_connection_file = os.path.join(credentials_dir, 'storage.connection')
             if os.path.exists(storage_connection_file):
                 with open(storage_connection_file, 'r') as f:
+                    connection_string = f.read().strip()
+        
+        # Method 2: Direct file path (fallback for older systemd)
+        if not connection_string:
+            storage_file = os.getenv('STORAGE_CONNECTION_STRING_FILE')
+            if storage_file and os.path.exists(storage_file):
+                with open(storage_file, 'r') as f:
                     connection_string = f.read().strip()
 
     if not connection_string:
@@ -107,11 +115,19 @@ def main():
 
     # Try to read from systemd credential file if env var not set
     if not connection_string:
+        # Method 1: systemd LoadCredential (most secure)
         credentials_dir = os.getenv('CREDENTIALS_DIRECTORY')
         if credentials_dir:
             storage_connection_file = os.path.join(credentials_dir, 'storage.connection')
             if os.path.exists(storage_connection_file):
                 with open(storage_connection_file, 'r') as f:
+                    connection_string = f.read().strip()
+        
+        # Method 2: Direct file path (fallback for older systemd)
+        if not connection_string:
+            storage_file = os.getenv('STORAGE_CONNECTION_STRING_FILE')
+            if storage_file and os.path.exists(storage_file):
+                with open(storage_file, 'r') as f:
                     connection_string = f.read().strip()
 
     if connection_string:
