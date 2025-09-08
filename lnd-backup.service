@@ -1,25 +1,49 @@
 [Unit]
-Description=LND Channel Backup Monitor with Dropbox
+Description=LND Channel Backup Monitor with Cloud Storage
+Documentation=https://github.com/echennells/lnd-backup-inotify-dropbox
 After=network.target docker.service
-Wants=docker.service
+Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/home/ubuntu/lnd-backup-inotify-dropbox/channel-backup-monitor.sh
-LoadCredential=dropbox-token:/etc/lnd-backup/dropbox-token
+User=lndbackup
+Group=bitcoin
+
+# Load all configuration from environment file
+EnvironmentFile=/etc/lnd-backup/.env
+
+# Execute the monitor script (path from env)
+ExecStart=/bin/bash -c '${LND_BACKUP_MONITOR_SCRIPT:-/usr/local/bin/channel-backup-monitor.sh}'
+
+# Optional secure credential for storage
+LoadCredential=storage.connection:/etc/lnd-backup/credentials/storage-connection
+
+# Restart policy
 Restart=always
 RestartSec=10
-User=bitcoinbackup
-Group=bitcoinbackup
+StartLimitInterval=600
+StartLimitBurst=5
+
+# Security hardening
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+# Paths are configured via environment variables
+ReadWritePaths=${STAGING_DIR:-/tmp/lnd-backup-staging} ${LOCAL_BACKUP_DIR:-/var/backup/lnd}
+ReadOnlyPaths=${LND_DATA_DIR:-/home/ubuntu/volumes/.lnd}
+
+# Resource limits
+MemoryLimit=256M
+CPUQuota=20%
 
 # Logging
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=lnd-backup
 
-# Environment
-Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-WorkingDirectory=/home/ubuntu/lnd-backup-inotify-dropbox
+# Working directory from environment
+WorkingDirectory=${BACKUP_SCRIPT_DIR:-/usr/local/lib/lnd-backup}
 
 [Install]
 WantedBy=multi-user.target

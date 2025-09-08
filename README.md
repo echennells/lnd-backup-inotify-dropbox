@@ -1,11 +1,19 @@
 # LND & Taproot Assets Backup System
 
-Automated backup system for LND channel.backup files and Taproot Assets database using inotify to detect changes and Dropbox for storage.
+Automated backup system for LND channel.backup files and Taproot Assets database using inotify to detect changes and cloud storage.
+
+⚠️ **CRITICAL WARNING FOR TAPROOT ASSETS** ⚠️
+
+As of Taproot Assets v0.3.0+, according to Lightning Labs documentation:
+- **There is NO recovery mechanism from lnd seed alone**
+- **Loss of tapd database = PERMANENT loss of ALL Taproot Assets**
+- **The BTC anchoring the assets will also become unspendable**
+- **Regular backups (hourly or more frequent) are ESSENTIAL**
 
 ## Features
 
 - **Automatic Detection**: Uses inotify to monitor channel.backup file changes with fallback polling
-- **Taproot Assets Support**: Daily backups of critical tapd database files
+- **Taproot Assets Support**: Hourly backups of critical tapd database files (configurable frequency)
 - **Multiple Storage Providers**: Supports Dropbox and Azure Blob Storage
 - **Pluggable Architecture**: Easy to add new storage providers
 - **Timestamped Backups**: Keeps timestamped versions of all backups
@@ -197,14 +205,36 @@ sudo journalctl -fu lnd-backup
 
 ## Recovery
 
-To restore from a backup:
+### LND Channel Recovery
 
-1. Download the backup file from Dropbox
+To restore from a channel backup:
+
+1. Download the backup file from cloud storage
 2. Stop LND
 3. Place the backup file in the correct location
 4. Start LND with recovery options
 
 **Important**: Channel backups are only for disaster recovery. They allow you to request channel closure from peers but don't restore channel state.
+
+### Taproot Assets Recovery
+
+⚠️ **CRITICAL**: Taproot Assets recovery requires BOTH:
+1. The lnd seed phrase (for private keys)
+2. The complete tapd database backup (tapd.db, tapd.db-wal, tapd.db-shm)
+
+To restore Taproot Assets:
+
+1. Download the latest tapd backup archive from cloud storage
+2. Stop tapd daemon
+3. Extract the archive to restore:
+   - Database files to `~/.tapd/data/<network>/`
+   - Optional: proof files to `~/.tapd/data/<network>/proofs/`
+4. Restart tapd daemon
+
+**WARNING**: 
+- Using an outdated backup is safe but you may lose access to newer assets
+- There's no penalty mechanism like in Lightning
+- NEVER delete the Lightning Terminal app in Umbrel without backing up tapd data first
 
 ## Troubleshooting
 

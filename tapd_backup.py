@@ -73,33 +73,49 @@ def setup_dropbox_client():
         return None
 
 def get_tapd_files():
-    """Get list of tapd database files to backup"""
+    """Get list of tapd database files to backup
+    
+    According to Lightning Labs documentation:
+    - tapd.db, tapd.db-wal, and tapd.db-shm are critical
+    - Loss of these files means permanent loss of all Taproot Assets
+    - The proofs directory is optional but recommended
+    """
     files_to_backup = []
     tapd_dir = Path(TAPD_DATA_DIR)
     
     if not tapd_dir.exists():
         print(f"Warning: Tapd directory not found at {TAPD_DATA_DIR}")
-        return files_to_backup
+        return files_to_backup, []
     
-    # Primary database file
+    # Critical database files (MUST be backed up)
     db_file = tapd_dir / "tapd.db"
     if db_file.exists():
         files_to_backup.append(db_file)
     
-    # WAL (Write-Ahead Logging) file
+    # WAL (Write-Ahead Logging) file - critical for data consistency
     wal_file = tapd_dir / "tapd.db-wal"
     if wal_file.exists():
         files_to_backup.append(wal_file)
     
-    # Shared memory file
+    # Shared memory file - needed for SQLite consistency
     shm_file = tapd_dir / "tapd.db-shm"
     if shm_file.exists():
         files_to_backup.append(shm_file)
     
-    if not files_to_backup:
-        print("Warning: No tapd database files found")
+    # Proof files (optional but recommended for faster access)
+    proof_files = []
+    proofs_dir = tapd_dir / "proofs"
+    if proofs_dir.exists() and proofs_dir.is_dir():
+        # Get all proof files recursively
+        proof_files = list(proofs_dir.rglob("*"))
+        if proof_files:
+            print(f"Found {len(proof_files)} proof files to include in backup")
     
-    return files_to_backup
+    if not files_to_backup:
+        print("WARNING: No tapd database files found - this is CRITICAL!")
+        print("Without these files, all Taproot Assets will be permanently lost!")
+    
+    return files_to_backup, proof_files
 
 def calculate_checksum(file_path):
     """Calculate SHA256 checksum of a file"""
@@ -110,10 +126,10 @@ def calculate_checksum(file_path):
     return sha256.hexdigest()
 
 def create_backup_archive(timestamp):
-    """Create tar.gz archive of tapd database files"""
-    files_to_backup = get_tapd_files()
+    """Create tar.gz archive of tapd database files and optional proof files"""
+    db_files, proof_files = get_tapd_files()
     
-    if not files_to_backup:
+    if not db_files:
         return None, {}
     
     # Create temporary archive file
@@ -121,14 +137,27 @@ def create_backup_archive(timestamp):
     
     checksums = {}
     with tarfile.open(archive_path, "w:gz") as tar:
-        for file_path in files_to_backup:
-            # Calculate checksum before adding to archive
-            checksums[file_path.name] = calculate_checksum(file_path)
-            
-            # Add file to archive with relative path
-            arcname = f"tapd-backup-{timestamp}/{file_path.name}"
-            tar.add(file_path, arcname=arcname)
-            print(f"Added {file_path.name} to archive (checksum: {checksums[file_path.name][:16]}...)")
+        # Add critical database files
+        for file_path in db_files:
+            if file_path.is_file():
+                # Calculate checksum before adding to archive
+                checksums[file_path.name] = calculate_checksum(file_path)
+                
+                # Add file to archive with relative path
+                arcname = f"tapd-backup-{timestamp}/database/{file_path.name}"
+                tar.add(file_path, arcname=arcname)
+                print(f"Added {file_path.name} to archive (checksum: {checksums[file_path.name][:16]}...)")
+        
+        # Add proof files if they exist (optional but recommended)
+        if proof_files:
+            tapd_dir = Path(TAPD_DATA_DIR)
+            for proof_file in proof_files:
+                if proof_file.is_file():
+                    # Calculate relative path from tapd directory
+                    rel_path = proof_file.relative_to(tapd_dir)
+                    arcname = f"tapd-backup-{timestamp}/{rel_path}"
+                    tar.add(proof_file, arcname=arcname)
+            print(f"Added {len(proof_files)} proof files to archive")
     
     return archive_path, checksums
 
@@ -290,7 +319,13 @@ def upload_to_dropbox(archive_path, timestamp, checksums, max_retries=3):
 def main():
     """Main function"""
     print(f"[{datetime.now()}] Starting Taproot Assets backup...")
-    print("WARNING: tapd backups are CRITICAL - loss means permanent asset loss")
+    print("="*70)
+    print("CRITICAL WARNING: Per Lightning Labs v0.3.0+ documentation:")
+    print("- tapd database files MUST be backed up regularly (hourly or more)")
+    print("- Loss of these files = PERMANENT loss of ALL Taproot Assets")
+    print("- The BTC anchoring the assets will also be unspendable")
+    print("- Recovery from lnd seed alone is NOT possible")
+    print("="*70)
     
     # Check if tapd directory exists
     if not Path(TAPD_DATA_DIR).exists():

@@ -43,9 +43,6 @@ Thumbs.db
 *.swp
 *.swo
 
-# Nix
-result
-result-*
 
 # Test data
 test-data/

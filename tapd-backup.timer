@@ -1,9 +1,13 @@
 [Unit]
-Description=Daily Taproot Assets Database Backup Timer
+Description=Daily Taproot Assets Database Backup Timer (Supplements Real-time Monitoring)
 Requires=tapd-backup.service
 
 [Timer]
-# Run daily at 3 AM
+# Daily backup as a safety net (inotify provides real-time backups on changes)
+# Per Lightning Labs: backups should be frequent based on transaction volume
+# With inotify monitoring, this daily backup ensures we have a backup even if:
+# - inotify fails to detect a change
+# - the system was offline during changes
 OnCalendar=daily
 OnCalendar=*-*-* 03:00:00
 Persistent=true
@@ -11,7 +15,7 @@ Persistent=true
 # Run immediately if system was offline at scheduled time
 AccuracySec=1h
 
-# Run on timer activation (first install)
+# Run shortly after timer activation (first install)
 OnActiveSec=30s
 
 [Install]
