@@ -14,6 +14,41 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Parse command line arguments
+SETUP_PERMISSIONS=false
+for arg in "$@"; do
+    case $arg in
+        --setup-permissions)
+            SETUP_PERMISSIONS=true
+            shift
+            ;;
+        --help|-h)
+            echo "Usage: $0 [OPTIONS]"
+            echo ""
+            echo "Options:"
+            echo "  --setup-permissions  Set up opinionated permissions (group ownership, ACLs)"
+            echo "                       If this fails, the installation will abort with error"
+            echo "  --help, -h          Show this help message"
+            echo ""
+            echo "Default behavior (no flags):"
+            echo "  - Installs the service without modifying permissions"
+            echo "  - Assumes user has already configured proper permissions"
+            echo ""
+            echo "With --setup-permissions:"
+            echo "  - Creates lndbackup group and adds service user to it"
+            echo "  - Sets group ownership on LND/TAPD data directories"
+            echo "  - Configures ACLs for proper access"
+            echo "  - Exits with error if permission setup fails"
+            exit 0
+            ;;
+        *)
+            log_error "Unknown option: $arg"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
+
 # Load .env file if it exists
 if [[ -f "$SCRIPT_DIR/.env" ]]; then
     log_info "Loading environment from .env file..."
@@ -131,28 +166,45 @@ log_info "Channel backup path: $BACKUP_PATH"
 
 # Check if we can access the backup path or its directory
 # NOTE: We need to check accessibility for the SERVICE_USER (lndbackup), not current user
-NEEDS_PERMISSION_SETUP=false
-if [[ -f "$BACKUP_PATH" ]]; then
-    # Check if service user can access the backup file
-    if ! sudo -u "$SERVICE_USER" test -r "$BACKUP_PATH" 2>/dev/null; then
-        log_warn "Service user ($SERVICE_USER) cannot read channel backup file at $BACKUP_PATH"
-        NEEDS_PERMISSION_SETUP=true
-    fi
-elif [[ -d "$(dirname "$BACKUP_PATH")" ]]; then
-    # Check if service user can access the LND data directory
-    if ! sudo -u "$SERVICE_USER" test -r "$(dirname "$BACKUP_PATH")" 2>/dev/null; then
-        log_warn "Service user ($SERVICE_USER) cannot access LND data directory at $(dirname "$BACKUP_PATH")"
-        NEEDS_PERMISSION_SETUP=true
-    fi
+if [[ "$SETUP_PERMISSIONS" == "true" ]]; then
+    log_info "Permission setup mode enabled (--setup-permissions flag)"
 else
-    # Check if parent directories exist but aren't accessible
-    PARENT_DIR="$LND_DATA_DIR"
-    if [[ -d "$PARENT_DIR" ]]; then
-        # Check if service user can access the data subdirectory
-        if ! sudo -u "$SERVICE_USER" test -r "$PARENT_DIR/data" 2>/dev/null; then
-            log_warn "Service user ($SERVICE_USER) cannot access LND data directory at $PARENT_DIR/data"
-            NEEDS_PERMISSION_SETUP=true
+    # In default mode, check if permissions are already OK
+    PERMISSION_CHECK_FAILED=false
+    if [[ -f "$BACKUP_PATH" ]]; then
+        # Check if service user can access the backup file
+        if ! sudo -u "$SERVICE_USER" test -r "$BACKUP_PATH" 2>/dev/null; then
+            log_warn "Service user ($SERVICE_USER) cannot read channel backup file at $BACKUP_PATH"
+            PERMISSION_CHECK_FAILED=true
         fi
+    elif [[ -d "$(dirname "$BACKUP_PATH")" ]]; then
+        # Check if service user can access the LND data directory
+        if ! sudo -u "$SERVICE_USER" test -r "$(dirname "$BACKUP_PATH")" 2>/dev/null; then
+            log_warn "Service user ($SERVICE_USER) cannot access LND data directory at $(dirname "$BACKUP_PATH")"
+            PERMISSION_CHECK_FAILED=true
+        fi
+    else
+        # Check if parent directories exist but aren't accessible
+        PARENT_DIR="$LND_DATA_DIR"
+        if [[ -d "$PARENT_DIR" ]]; then
+            # Check if service user can access the data subdirectory
+            if ! sudo -u "$SERVICE_USER" test -r "$PARENT_DIR/data" 2>/dev/null; then
+                log_warn "Service user ($SERVICE_USER) cannot access LND data directory at $PARENT_DIR/data"
+                PERMISSION_CHECK_FAILED=true
+            fi
+        fi
+    fi
+    
+    if [[ "$PERMISSION_CHECK_FAILED" == "true" ]]; then
+        log_warn "=================================================================="
+        log_warn "Permission issues detected but --setup-permissions flag not used."
+        log_warn "The service may not work correctly without proper permissions."
+        log_warn ""
+        log_warn "Options:"
+        log_warn "1. Run with --setup-permissions flag to automatically fix permissions"
+        log_warn "2. Manually configure permissions for the lndbackup user"
+        log_warn "=================================================================="
+        # Continue installation anyway in default mode
     fi
 fi
 
@@ -195,24 +247,31 @@ if [[ ${#MISSING_DEPS[@]} -gt 0 ]]; then
     fi
 fi
 
-# Handle permission setup if needed
-if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
-    log_info "Setting up permissions for LND data access..."
+# Handle permission setup only if flag is set
+if [[ "$SETUP_PERMISSIONS" == "true" ]]; then
+    log_info "Setting up permissions for LND data access (--setup-permissions mode)..."
 
     # Create lndbackup group if it doesn't exist
     if ! getent group lndbackup >/dev/null 2>&1; then
-        groupadd lndbackup
+        if ! groupadd lndbackup; then
+            log_error "Failed to create lndbackup group (--setup-permissions mode)"
+            exit 1
+        fi
     fi
 
     # Add service user to lndbackup group (usermod -a handles existing membership)
     if getent group lndbackup >/dev/null 2>&1; then
-        usermod -a -G lndbackup "$SERVICE_USER" && log_info "Added $SERVICE_USER to lndbackup group"
+        if ! usermod -a -G lndbackup "$SERVICE_USER"; then
+            log_error "Failed to add $SERVICE_USER to lndbackup group (--setup-permissions mode)"
+            exit 1
+        fi
+        log_info "Added $SERVICE_USER to lndbackup group"
     fi
 
     # Set group permissions on LND data
+    PERMISSION_SUCCESS=true
     if [[ -d "$LND_DATA_DIR/data" ]]; then
         log_info "Setting group permissions on LND data..."
-        PERMISSION_SUCCESS=true
                 if ! chgrp -R lndbackup "$LND_DATA_DIR/data"; then
                     log_error "Failed to set group ownership on $LND_DATA_DIR/data"
                     PERMISSION_SUCCESS=false
@@ -327,10 +386,14 @@ if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
                         done
                     fi
                 fi
+    else
+        log_warn "LND data directory not found at $LND_DATA_DIR/data"
+        log_warn "Permissions will need to be configured after LND creates the directory"
     fi
 
-    if [[ "$PERMISSION_SUCCESS" != "true" ]]; then
-        log_error "Critical permission setup failed - manual intervention required"
+    if [[ "$PERMISSION_SUCCESS" == "false" ]]; then
+        log_error "Permission setup failed (--setup-permissions mode)"
+        log_error "The installation cannot continue when --setup-permissions is used and fails"
         exit 1
     fi
 fi
@@ -582,7 +645,13 @@ if [[ "${ENABLE_TAPD:-false}" == "true" ]]; then
 fi
 echo
 echo "Important notes:"
-echo "- If permission setup was required, you may need to log out and back in for group changes to take effect"
+if [[ "$SETUP_PERMISSIONS" == "true" ]]; then
+    echo "- Permissions were configured with --setup-permissions flag"
+    echo "- You may need to log out and back in for group changes to take effect"
+else
+    echo "- Permissions were NOT modified (default mode)"
+    echo "- Ensure the lndbackup user has read access to LND/TAPD data directories"
+fi
 echo "- Ensure your storage provider credentials are properly configured"
 echo "- Check the service logs if backups don't work as expected"
 echo
