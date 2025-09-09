@@ -310,8 +310,7 @@ if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
                     TAPD_DATA_DIR="${TAPD_DATA_DIR:-$HOME/.tapd}"
                     log_info "Setting up tapd permissions for $TAPD_DATA_DIR..."
                     
-                    # Check if TAPD directory exists (or path exists but we can't access due to permissions)
-                    if [[ -d "$TAPD_DATA_DIR" ]] || ls -ld "$TAPD_DATA_DIR" >/dev/null 2>&1; then
+                    if [[ -d "$TAPD_DATA_DIR" ]]; then
                         # Set ACL on TAPD parent directories for traversal access
                         # TAPD creates directories with 700 permissions, blocking traversal
                         tapd_parent_dir=$(dirname "$TAPD_DATA_DIR")
@@ -426,8 +425,7 @@ if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
                     TAPD_DATA_DIR="${TAPD_DATA_DIR:-$HOME/.tapd}"
                     log_info "Setting up tapd permissions for $TAPD_DATA_DIR..."
                     
-                    # Check if TAPD directory exists (or path exists but we can't access due to permissions)
-                    if [[ -d "$TAPD_DATA_DIR" ]] || sudo ls -ld "$TAPD_DATA_DIR" >/dev/null 2>&1; then
+                    if [[ -d "$TAPD_DATA_DIR" ]]; then
                         # Grant group access to tapd data directory
                         if ! sudo chgrp -R lndbackup "$TAPD_DATA_DIR"; then
                             log_error "Failed to set group ownership on $TAPD_DATA_DIR"
