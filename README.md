@@ -33,19 +33,18 @@ As of Taproot Assets v0.3.0+, according to Lightning Labs documentation:
 
 ## Installation
 
-### User and Permission Management
+### System Installation
 
-The backup system requires proper permissions to access LND's channel.backup file. The installer handles this automatically, but understanding the setup is important:
+The backup system requires proper permissions to access LND's channel.backup file. The installer handles this automatically by:
 
-**System Installation (Recommended for production):**
-- Creates `lndbackup` system user
-- Creates `bitcoin` group for shared access
-- Adds both `lnd` and `lndbackup` users to `bitcoin` group
-- Sets proper group permissions on LND directories
+- Creates `lndbackup` system user and group
+- Sets up ACL permissions on LND data directories
+- Handles directory traversal permissions for restrictive setups
+- Configures systemd services to run as the `lndbackup` user
 
-**User Installation (Development/testing):**
-- Runs as current user
-- May require manual permission fixes if LND runs as different user
+**Requirements:**
+- Must be run with sudo privileges
+- Automatically detects and configures permissions for your LND setup
 
 **Manual Permission Fix (if needed):**
 ```bash
@@ -106,13 +105,11 @@ export STORAGE_CONNECTION_STRING="dropbox:YOUR_DROPBOX_TOKEN"
 # OR for Azure:
 # export STORAGE_CONNECTION_STRING="azure://account.blob.core.windows.net/container?sp=racwl&..."
 
-# Run the installer
-./install.sh
+# Run the installer (requires sudo)
+sudo ./install.sh
 
 # Start the service
 sudo systemctl enable --now lnd-backup
-# OR for user installation:
-# systemctl --user enable --now lnd-backup
 ```
 
 ### 4. Manual Installation
