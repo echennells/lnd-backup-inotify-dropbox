@@ -74,50 +74,44 @@ get_backup_path() {
     esac
 }
 
-# Create lndbackup user if running as root
+# Create lndbackup user and group
 create_backup_user() {
-    if [[ $EUID -eq 0 ]]; then
-        # Create lndbackup group if it doesn't exist
-        if ! getent group lndbackup >/dev/null 2>&1; then
-            log_info "Creating lndbackup group..."
-            if ! groupadd --system lndbackup; then
-                log_error "Failed to create lndbackup group"
-                return 1
-            fi
+    # Create lndbackup group if it doesn't exist
+    if ! getent group lndbackup >/dev/null 2>&1; then
+        log_info "Creating lndbackup group..."
+        if ! groupadd --system lndbackup; then
+            log_error "Failed to create lndbackup group"
+            return 1
         fi
+    fi
 
-        # Create lndbackup user if it doesn't exist
-        if ! getent passwd lndbackup >/dev/null 2>&1; then
-            log_info "Creating lndbackup user..."
-            if ! useradd --system --shell /bin/false --home-dir /var/lib/lndbackup \
-                        --create-home --gid lndbackup lndbackup; then
-                log_error "Failed to create lndbackup user"
-                return 1
-            fi
+    # Create lndbackup user if it doesn't exist
+    if ! getent passwd lndbackup >/dev/null 2>&1; then
+        log_info "Creating lndbackup user..."
+        if ! useradd --system --shell /bin/false --home-dir /var/lib/lndbackup \
+                    --create-home --gid lndbackup lndbackup; then
+            log_error "Failed to create lndbackup user"
+            return 1
         fi
     fi
     return 0
 }
 
-# Setup directories based on scope
-if [[ $EUID -eq 0 ]]; then
-    create_backup_user
-    SYSTEMD_SCOPE="system"
-    SYSTEMD_DIR="/etc/systemd/system"
-    SERVICE_USER="lndbackup"
-    CONFIG_DIR="/etc/lnd-backup"
-    CRED_DIR="/etc/credstore/lnd-backup"
-    INSTALL_DIR="/usr/local/bin"
-    WANTED_BY="multi-user.target"
-else
-    SYSTEMD_SCOPE="user"
-    SYSTEMD_DIR="$HOME/.config/systemd/user"
-    SERVICE_USER="$USER"
-    CONFIG_DIR="$HOME/.config/lnd-backup"
-    CRED_DIR="$HOME/.config/lnd-backup/credentials"
-    INSTALL_DIR="$HOME/.local/bin"
-    WANTED_BY="default.target"
+# Require sudo/root privileges
+if [[ $EUID -ne 0 ]]; then
+    log_error "This script must be run with sudo or as root"
+    exit 1
 fi
+
+# Setup system directories and user
+create_backup_user
+SYSTEMD_SCOPE="system"
+SYSTEMD_DIR="/etc/systemd/system"
+SERVICE_USER="lndbackup"
+CONFIG_DIR="/etc/lnd-backup"
+CRED_DIR="/etc/credstore/lnd-backup"
+INSTALL_DIR="/usr/local/bin"
+WANTED_BY="multi-user.target"
 
 log_info "Installing LND Backup Monitor"
 log_info "Scope: $SYSTEMD_SCOPE"
@@ -139,39 +133,24 @@ log_info "Channel backup path: $BACKUP_PATH"
 # NOTE: We need to check accessibility for the SERVICE_USER (lndbackup), not current user
 NEEDS_PERMISSION_SETUP=false
 if [[ -f "$BACKUP_PATH" ]]; then
-    if [[ $EUID -eq 0 ]] && [[ "$SERVICE_USER" != "$USER" ]]; then
-        # When running as root but service will run as different user, check if that user can access
-        if ! sudo -u "$SERVICE_USER" test -r "$BACKUP_PATH" 2>/dev/null; then
-            log_warn "Service user ($SERVICE_USER) cannot read channel backup file at $BACKUP_PATH"
-            NEEDS_PERMISSION_SETUP=true
-        fi
-    elif ! [[ -r "$BACKUP_PATH" ]]; then
-        log_warn "Cannot read channel backup file at $BACKUP_PATH"
+    # Check if service user can access the backup file
+    if ! sudo -u "$SERVICE_USER" test -r "$BACKUP_PATH" 2>/dev/null; then
+        log_warn "Service user ($SERVICE_USER) cannot read channel backup file at $BACKUP_PATH"
         NEEDS_PERMISSION_SETUP=true
     fi
 elif [[ -d "$(dirname "$BACKUP_PATH")" ]]; then
-    if [[ $EUID -eq 0 ]] && [[ "$SERVICE_USER" != "$USER" ]]; then
-        # When running as root but service will run as different user, check if that user can access
-        if ! sudo -u "$SERVICE_USER" test -r "$(dirname "$BACKUP_PATH")" 2>/dev/null; then
-            log_warn "Service user ($SERVICE_USER) cannot access LND data directory at $(dirname "$BACKUP_PATH")"
-            NEEDS_PERMISSION_SETUP=true
-        fi
-    elif ! [[ -r "$(dirname "$BACKUP_PATH")" ]]; then
-        log_warn "Cannot access LND data directory"
+    # Check if service user can access the LND data directory
+    if ! sudo -u "$SERVICE_USER" test -r "$(dirname "$BACKUP_PATH")" 2>/dev/null; then
+        log_warn "Service user ($SERVICE_USER) cannot access LND data directory at $(dirname "$BACKUP_PATH")"
         NEEDS_PERMISSION_SETUP=true
     fi
 else
     # Check if parent directories exist but aren't accessible
     PARENT_DIR="$LND_DATA_DIR"
     if [[ -d "$PARENT_DIR" ]]; then
-        if [[ $EUID -eq 0 ]] && [[ "$SERVICE_USER" != "$USER" ]]; then
-            # Check if service user can access the data subdirectory
-            if ! sudo -u "$SERVICE_USER" test -r "$PARENT_DIR/data" 2>/dev/null; then
-                log_warn "Service user ($SERVICE_USER) cannot access LND data directory at $PARENT_DIR/data"
-                NEEDS_PERMISSION_SETUP=true
-            fi
-        elif ! [[ -r "$PARENT_DIR/data" ]] 2>/dev/null; then
-            log_warn "LND data directory exists but is not accessible"
+        # Check if service user can access the data subdirectory
+        if ! sudo -u "$SERVICE_USER" test -r "$PARENT_DIR/data" 2>/dev/null; then
+            log_warn "Service user ($SERVICE_USER) cannot access LND data directory at $PARENT_DIR/data"
             NEEDS_PERMISSION_SETUP=true
         fi
     fi
@@ -222,33 +201,18 @@ if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
 
     # Create lndbackup group if it doesn't exist
     if ! getent group lndbackup >/dev/null 2>&1; then
-        if [[ $EUID -eq 0 ]]; then
-            groupadd lndbackup
-        else
-            log_info "Creating lndbackup group (requires sudo)..."
-            sudo groupadd lndbackup || {
-                log_error "Failed to create lndbackup group"
-                log_info "You may need to manually set up permissions"
-            }
-        fi
+        groupadd lndbackup
     fi
 
-        # Add service user to lndbackup group (usermod -a handles existing membership)
-        if getent group lndbackup >/dev/null 2>&1; then
-            if [[ $EUID -eq 0 ]]; then
-                usermod -a -G lndbackup "$SERVICE_USER" && log_info "Added $SERVICE_USER to lndbackup group"
-            else
-                log_info "Adding $SERVICE_USER to lndbackup group (requires sudo)..."
-                sudo usermod -a -G lndbackup "$SERVICE_USER" && log_info "Added $SERVICE_USER to lndbackup group"
-            fi
-        fi
+    # Add service user to lndbackup group (usermod -a handles existing membership)
+    if getent group lndbackup >/dev/null 2>&1; then
+        usermod -a -G lndbackup "$SERVICE_USER" && log_info "Added $SERVICE_USER to lndbackup group"
+    fi
 
-        # Try to set group permissions on LND data
-        if [[ -d "$LND_DATA_DIR/data" ]]; then
-            log_info "Setting group permissions on LND data (may require sudo)..."
-            PERMISSION_SUCCESS=true
-
-            if [[ $EUID -eq 0 ]]; then
+    # Set group permissions on LND data
+    if [[ -d "$LND_DATA_DIR/data" ]]; then
+        log_info "Setting group permissions on LND data..."
+        PERMISSION_SUCCESS=true
                 if ! chgrp -R lndbackup "$LND_DATA_DIR/data"; then
                     log_error "Failed to set group ownership on $LND_DATA_DIR/data"
                     PERMISSION_SUCCESS=false
@@ -363,131 +327,12 @@ if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
                         done
                     fi
                 fi
-            else
-                if ! sudo chgrp -R lndbackup "$LND_DATA_DIR/data"; then
-                    log_error "Failed to set group ownership on $LND_DATA_DIR/data (sudo required)"
-                    PERMISSION_SUCCESS=false
-                fi
+    fi
 
-                if ! sudo chmod -R g+rX "$LND_DATA_DIR/data"; then
-                    log_error "Failed to set group permissions on $LND_DATA_DIR/data (sudo required)"
-                    PERMISSION_SUCCESS=false
-                fi
-
-                # If LND_DATA_DIR is under a home directory, grant traverse permission
-                if [[ "$LND_DATA_DIR" =~ ^/home/ ]]; then
-                    # Extract the home directory path (e.g., /home/ubuntu from /home/ubuntu/volumes/.lnd)
-                    HOME_DIR=$(echo "$LND_DATA_DIR" | grep -oE "^/home/[^/]+")
-                    log_info "Granting traverse permissions through $HOME_DIR..."
-
-                    # Grant only execute (traverse) permission, not read
-                    if ! sudo setfacl -m u:lndbackup:x "$HOME_DIR"; then
-                        log_error "Failed to set ACL traverse permission on $HOME_DIR"
-                        PERMISSION_SUCCESS=false
-                    fi
-
-                    # Grant traverse on intermediate directories if needed
-                    CURRENT_PATH="$HOME_DIR"
-                    REMAINING_PATH="${LND_DATA_DIR#$HOME_DIR/}"
-                    IFS='/' read -ra DIRS <<< "$REMAINING_PATH"
-                    for dir in "${DIRS[@]}"; do
-                        CURRENT_PATH="$CURRENT_PATH/$dir"
-                        if [[ -d "$CURRENT_PATH" ]]; then
-                            if ! sudo setfacl -m u:lndbackup:x "$CURRENT_PATH"; then
-                                log_error "Failed to set ACL traverse permission on $CURRENT_PATH"
-                                PERMISSION_SUCCESS=false
-                            fi
-                        fi
-                    done
-                fi
-
-                # Set default ACL so new files created by LND are readable by lndbackup group
-                for network_dir in "$LND_DATA_DIR"/data/chain/bitcoin/*/; do
-                    if [[ -d "$network_dir" ]]; then
-                        if ! sudo setfacl -d -m g:lndbackup:r "$network_dir"; then
-                            log_error "Failed to set default ACL on $network_dir"
-                            PERMISSION_SUCCESS=false
-                        fi
-                        
-                        # Set ACL on existing channel.backup file if it exists
-                        if [[ -f "$network_dir/channel.backup" ]]; then
-                            log_info "Setting ACL on existing channel.backup in $network_dir"
-                            if ! sudo setfacl -m u:lndbackup:r "$network_dir/channel.backup"; then
-                                log_error "Failed to set ACL on existing $network_dir/channel.backup"
-                                PERMISSION_SUCCESS=false
-                            fi
-                        fi
-                    fi
-                done
-                
-                # Set up tapd permissions if enabled
-                if [[ "${ENABLE_TAPD:-false}" == "true" ]]; then
-                    TAPD_DATA_DIR="${TAPD_DATA_DIR:-$HOME/.tapd}"
-                    log_info "Setting up tapd permissions for $TAPD_DATA_DIR..."
-                    
-                    if [[ -d "$TAPD_DATA_DIR" ]]; then
-                        # Grant group access to tapd data directory
-                        if ! sudo chgrp -R lndbackup "$TAPD_DATA_DIR"; then
-                            log_error "Failed to set group ownership on $TAPD_DATA_DIR"
-                            PERMISSION_SUCCESS=false
-                        fi
-                        
-                        if ! sudo chmod -R g+rX "$TAPD_DATA_DIR"; then
-                            log_error "Failed to set group permissions on $TAPD_DATA_DIR"
-                            PERMISSION_SUCCESS=false
-                        fi
-                        
-                        # Set default ACL for new tapd files
-                        if ! sudo setfacl -d -m g:lndbackup:r "$TAPD_DATA_DIR"; then
-                            log_error "Failed to set default ACL on $TAPD_DATA_DIR"
-                            PERMISSION_SUCCESS=false
-                        fi
-                        
-                        # Set ACL on existing tapd database files
-                        for db_file in "$TAPD_DATA_DIR"/{tapd.db,tapd.db-wal,tapd.db-shm}; do
-                            if [[ -f "$db_file" ]]; then
-                                log_info "Setting ACL on existing $(basename "$db_file")"
-                                if ! sudo setfacl -m u:lndbackup:r "$db_file"; then
-                                    log_error "Failed to set ACL on $db_file"
-                                    PERMISSION_SUCCESS=false
-                                fi
-                            fi
-                        done
-                        
-                        # Handle tapd data subdirectories with proper permissions
-                        for subdir in "$TAPD_DATA_DIR"/*; do
-                            if [[ -d "$subdir" ]]; then
-                                if ! sudo setfacl -d -m g:lndbackup:r "$subdir"; then
-                                    log_error "Failed to set default ACL on $subdir"
-                                    PERMISSION_SUCCESS=false
-                                fi
-                            fi
-                        done
-                    fi
-                fi
-            fi
-
-            if [[ "$PERMISSION_SUCCESS" != "true" ]]; then
-                log_error "Critical permission setup failed - manual intervention required"
-                log_error "Please check that you have sudo permissions and proper directory access"
-                exit 1
-            fi
-        fi
-
-        # Force system service for permission handling
-        if [[ "$SYSTEMD_SCOPE" == "user" ]]; then
-            log_info "Switching to system service for permission handling..."
-            SYSTEMD_SCOPE="system"
-            SYSTEMD_DIR="/etc/systemd/system"
-            SERVICE_USER="lndbackup"
-            CONFIG_DIR="/etc/lnd-backup"
-            CRED_DIR="/etc/lnd-backup/credentials"
-            INSTALL_DIR="/usr/local/bin"
-            WANTED_BY="multi-user.target"
-            USE_GROUP="lndbackup"
-            # Update venv path for system scope
-            VENV_DIR="/opt/lnd-backup-venv"
-        fi
+    if [[ "$PERMISSION_SUCCESS" != "true" ]]; then
+        log_error "Critical permission setup failed - manual intervention required"
+        exit 1
+    fi
 fi
 
 
@@ -503,12 +348,8 @@ if command -v python3 &> /dev/null; then
     fi
 fi
 
-# Set up venv path based on scope
-if [[ $EUID -eq 0 ]]; then
-    VENV_DIR="/opt/lnd-backup-venv"
-else
-    VENV_DIR="$HOME/.local/share/lnd-backup-venv"
-fi
+# Set up venv path for system installation
+VENV_DIR="/opt/lnd-backup-venv"
 
 # Install uv if not available
 if ! command -v uv &> /dev/null; then
@@ -534,9 +375,7 @@ mkdir -p "$SYSTEMD_DIR"
 mkdir -p "$CRED_DIR"
 mkdir -p "$INSTALL_DIR"
 
-if [[ $EUID -eq 0 ]]; then
-    chmod 700 "$CRED_DIR"
-fi
+chmod 700 "$CRED_DIR"
 
 
 # Validate storage connection string format
@@ -654,17 +493,8 @@ chmod +x "$INSTALL_DIR/lnd-backup-wrapper"
 chmod +x "$INSTALL_DIR/backup.py"
 
 # Process systemd service template
-if [[ $SYSTEMD_SCOPE == "system" ]]; then
-    if [[ -n "${USE_GROUP:-}" ]]; then
-        USER_GROUP_SECTION="User=$SERVICE_USER
-Group=$USE_GROUP"
-    else
-        USER_GROUP_SECTION="User=$SERVICE_USER
+USER_GROUP_SECTION="User=$SERVICE_USER
 Group=$SERVICE_USER"
-    fi
-else
-    USER_GROUP_SECTION=""
-fi
 
 # Create temporary file for service
 cp "$SCRIPT_DIR/templates/lnd-backup.service" "$SYSTEMD_DIR/lnd-backup.service.tmp"
@@ -728,11 +558,7 @@ chmod +x "$CONFIG_DIR/uninstall.sh"
 
 # Reload systemd
 log_info "Reloading systemd..."
-if [[ $SYSTEMD_SCOPE == "system" ]]; then
-    systemctl daemon-reload
-else
-    systemctl --user daemon-reload
-fi
+systemctl daemon-reload
 
 # Summary
 echo
@@ -744,28 +570,15 @@ echo "Network: $NETWORK"
 echo "Scope: $SYSTEMD_SCOPE"
 echo
 echo "To start the service:"
-if [[ $SYSTEMD_SCOPE == "system" ]]; then
-    echo "  sudo systemctl enable --now lnd-backup"
-    echo "  sudo systemctl status lnd-backup"
-    echo "  sudo journalctl -fu lnd-backup"
-    if [[ "${ENABLE_TAPD:-false}" == "true" ]]; then
-        echo ""
-        echo "Tapd backup service:"
-        echo "  sudo systemctl enable --now tapd-backup"
-        echo "  sudo systemctl status tapd-backup"
-        echo "  sudo journalctl -fu tapd-backup"
-    fi
-else
-    echo "  systemctl --user enable --now lnd-backup"
-    echo "  systemctl --user status lnd-backup"
-    echo "  journalctl --user -fu lnd-backup"
-    if [[ "${ENABLE_TAPD:-false}" == "true" ]]; then
-        echo ""
-        echo "Tapd backup service:"
-        echo "  systemctl --user enable --now tapd-backup"
-        echo "  systemctl --user status tapd-backup"
-        echo "  journalctl --user -fu tapd-backup"
-    fi
+echo "  sudo systemctl enable --now lnd-backup"
+echo "  sudo systemctl status lnd-backup"
+echo "  sudo journalctl -fu lnd-backup"
+if [[ "${ENABLE_TAPD:-false}" == "true" ]]; then
+    echo ""
+    echo "Tapd backup service:"
+    echo "  sudo systemctl enable --now tapd-backup"
+    echo "  sudo systemctl status tapd-backup"
+    echo "  sudo journalctl -fu tapd-backup"
 fi
 echo
 echo "Important notes:"
