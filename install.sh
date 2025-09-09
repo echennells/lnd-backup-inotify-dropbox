@@ -313,8 +313,8 @@ if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
                     if [[ -d "$TAPD_DATA_DIR" ]]; then
                         # Set ACL on TAPD parent directories for traversal access
                         # TAPD creates directories with 700 permissions, blocking traversal
-                        local tapd_parent_dir=$(dirname "$TAPD_DATA_DIR")
-                        local tapd_grandparent_dir=$(dirname "$tapd_parent_dir")
+                        tapd_parent_dir=$(dirname "$TAPD_DATA_DIR")
+                        tapd_grandparent_dir=$(dirname "$tapd_parent_dir")
                         
                         if ! setfacl -m g:lndbackup:rx "$tapd_grandparent_dir" 2>/dev/null; then
                             log_info "Could not set ACL on $tapd_grandparent_dir (may not exist or already accessible)"
