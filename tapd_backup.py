@@ -19,6 +19,7 @@ import socket
 # Import unified storage system
 sys.path.append(os.path.dirname(__file__))
 from storage_providers import StorageProviderFactory
+import azure_provider
 
 # Load environment variables
 load_dotenv()
@@ -56,8 +57,14 @@ def get_storage_provider():
         raise ValueError("STORAGE_CONNECTION_STRING environment variable or credential file is required")
     
     # Parse and create storage provider
+    config = {
+        'backup_dir': BACKUP_DIR,
+        'local_backup_dir': LOCAL_BACKUP_DIR,
+        'keep_last_n_backups': KEEP_LAST_N,
+        'system_id': SYSTEM_ID
+    }
     factory = StorageProviderFactory()
-    return factory.get_provider(connection_string)
+    return factory.create_provider_from_connection_string(connection_string, config)
 
 def get_tapd_files():
     """Get list of tapd database files to backup
@@ -152,7 +159,7 @@ def cleanup_old_backups(storage_provider, prefix="tapd-backup-"):
     """Remove old tapd backups from storage"""
     try:
         system_dir = f"{BACKUP_DIR}/{SYSTEM_ID}"
-        backups = storage_provider.list_files(system_dir, prefix=prefix, suffix=".tar.gz")
+        backups = storage_provider.list_backups(system_dir, prefix=prefix, suffix=".tar.gz")
         
         # Sort by modification time (newest first)
         backups.sort(key=lambda x: x.get('modified', ''), reverse=True)

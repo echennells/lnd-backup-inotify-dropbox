@@ -311,6 +311,19 @@ if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
                     log_info "Setting up tapd permissions for $TAPD_DATA_DIR..."
                     
                     if [[ -d "$TAPD_DATA_DIR" ]]; then
+                        # Set ACL on TAPD parent directories for traversal access
+                        # TAPD creates directories with 700 permissions, blocking traversal
+                        local tapd_parent_dir=$(dirname "$TAPD_DATA_DIR")
+                        local tapd_grandparent_dir=$(dirname "$tapd_parent_dir")
+                        
+                        if ! setfacl -m g:lndbackup:rx "$tapd_grandparent_dir" 2>/dev/null; then
+                            log_info "Could not set ACL on $tapd_grandparent_dir (may not exist or already accessible)"
+                        fi
+                        
+                        if ! setfacl -m g:lndbackup:rx "$tapd_parent_dir" 2>/dev/null; then
+                            log_info "Could not set ACL on $tapd_parent_dir (may not exist or already accessible)"
+                        fi
+                        
                         # Grant group access to tapd data directory
                         if ! chgrp -R lndbackup "$TAPD_DATA_DIR"; then
                             log_error "Failed to set group ownership on $TAPD_DATA_DIR"
