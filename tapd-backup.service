@@ -1,46 +1,39 @@
 [Unit]
-Description=Taproot Assets Real-time Backup Monitor (Critical for Asset Recovery)
-Documentation=https://github.com/lightninglabs/taproot-assets
-After=network.target docker.service
-Wants=network-online.target
+Description=Taproot Assets Backup Monitor (%NETWORK%)
+After=network.target tapd.service
+Wants=network.target
 
 [Service]
 Type=simple
-User=lndbackup
-Group=bitcoin
+ExecStart=%INSTALL_DIR%/tapd-backup-wrapper
+Restart=on-failure
+RestartSec=30
 
-# Load all configuration from environment file
-EnvironmentFile=/etc/lnd-backup/.env
+# User/Group for system service
+%USER_GROUP_SECTION%
 
-# Optional secure credential for storage
-LoadCredential=storage.connection:/etc/lnd-backup/credentials/storage-connection
+# Environment
+EnvironmentFile=%CONFIG_DIR%/config
+Environment="NETWORK=%NETWORK%"
+Environment="CONFIG_DIR=%CONFIG_DIR%"
 
-# Execute the monitor script (path from env)
-ExecStart=/bin/bash -c '${TAPD_BACKUP_MONITOR_SCRIPT:-/usr/local/bin/tapd-backup-monitor.sh}'
-
-# Restart policy - critical service
-Restart=always
-RestartSec=10
-StartLimitInterval=600
-StartLimitBurst=5
+# Credential loading
+%CREDENTIAL_SECTION%
 
 # Security hardening
 PrivateTmp=yes
-NoNewPrivileges=yes
 ProtectSystem=strict
-ProtectHome=yes
-# Paths are configured via environment variables
-ReadWritePaths=${STAGING_DIR:-/tmp/tapd-backup-staging} ${LOCAL_BACKUP_DIR:-/var/backup/lnd}
-ReadOnlyPaths=${TAPD_DATA_DIR:-/home/ubuntu/volumes/.tapd}
+ProtectHome=read-only
+NoNewPrivileges=yes
+ReadWritePaths=%CONFIG_DIR% /tmp
+ReadOnlyPaths=%TAPD_DATA_DIR%
+
+# Group access for tapd files
+SupplementaryGroups=lndbackup
 
 # Resource limits
-MemoryLimit=256M
+MemoryMax=256M
 CPUQuota=20%
 
-# Logging
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=tapd-backup-monitor
-
 [Install]
-WantedBy=multi-user.target
+WantedBy=%WANTED_BY%

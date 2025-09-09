@@ -16,7 +16,9 @@ TAPD_DATA_DIR="${TAPD_DATA_DIR:-/home/ubuntu/volumes/.tapd/data/mainnet}"
 STAGING_DIR="${STAGING_DIR:-/tmp/tapd-backup-staging}"
 CHECK_INTERVAL="${CHECK_INTERVAL:-300}"
 LOG_LEVEL="${LOG_LEVEL:-info}"
-BACKUP_SCRIPT="${BACKUP_SCRIPT:-/home/ubuntu/lnd-backup-inotify-dropbox/venv/bin/python3 /home/ubuntu/lnd-backup-inotify-dropbox/tapd_backup.py}"
+VENV_DIR="${VENV_DIR:-/opt/lnd-backup-venv}"
+INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
+BACKUP_SCRIPT="${BACKUP_SCRIPT:-$VENV_DIR/bin/python3 $INSTALL_DIR/tapd_backup.py}"
 
 # Ensure staging directory exists
 mkdir -p "$STAGING_DIR"

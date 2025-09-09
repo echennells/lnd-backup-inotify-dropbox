@@ -44,13 +44,6 @@ detect_lnd_config() {
         fi
     fi
     
-    # Check for mutinynet
-    if [[ -f "${BITCOIN_DATA_DIR:-$HOME/.bitcoin}/bitcoin.conf" ]]; then
-        if grep -q "signetchallenge=512102f7561d208dd9ae99bf497273e16f389bdbd6c4742ddb8e6b216e64fa2928ad8f51ae" "${BITCOIN_DATA_DIR:-$HOME/.bitcoin}/bitcoin.conf"; then
-            network="signet-mutinynet"
-            log_info "Detected Mutinynet configuration"
-        fi
-    fi
     
     echo "$network"
 }
@@ -68,7 +61,7 @@ get_backup_path() {
         testnet)
             echo "$lnd_dir/data/chain/bitcoin/testnet/channel.backup"
             ;;
-        signet|signet-mutinynet)
+        signet)
             echo "$lnd_dir/data/chain/bitcoin/signet/channel.backup"
             ;;
         regtest)
@@ -311,6 +304,52 @@ if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
                         fi
                     fi
                 done
+                
+                # Set up tapd permissions if enabled (root mode)
+                if [[ "${ENABLE_TAPD:-false}" == "true" ]]; then
+                    TAPD_DATA_DIR="${TAPD_DATA_DIR:-$HOME/.tapd}"
+                    log_info "Setting up tapd permissions for $TAPD_DATA_DIR..."
+                    
+                    if [[ -d "$TAPD_DATA_DIR" ]]; then
+                        # Grant group access to tapd data directory
+                        if ! chgrp -R lndbackup "$TAPD_DATA_DIR"; then
+                            log_error "Failed to set group ownership on $TAPD_DATA_DIR"
+                            PERMISSION_SUCCESS=false
+                        fi
+                        
+                        if ! chmod -R g+rX "$TAPD_DATA_DIR"; then
+                            log_error "Failed to set group permissions on $TAPD_DATA_DIR"
+                            PERMISSION_SUCCESS=false
+                        fi
+                        
+                        # Set default ACL for new tapd files
+                        if ! setfacl -d -m g:lndbackup:r "$TAPD_DATA_DIR"; then
+                            log_error "Failed to set default ACL on $TAPD_DATA_DIR"
+                            PERMISSION_SUCCESS=false
+                        fi
+                        
+                        # Set ACL on existing tapd database files
+                        for db_file in "$TAPD_DATA_DIR"/{tapd.db,tapd.db-wal,tapd.db-shm}; do
+                            if [[ -f "$db_file" ]]; then
+                                log_info "Setting ACL on existing $(basename "$db_file")"
+                                if ! setfacl -m u:lndbackup:r "$db_file"; then
+                                    log_error "Failed to set ACL on $db_file"
+                                    PERMISSION_SUCCESS=false
+                                fi
+                            fi
+                        done
+                        
+                        # Handle tapd data subdirectories with proper permissions
+                        for subdir in "$TAPD_DATA_DIR"/*; do
+                            if [[ -d "$subdir" ]]; then
+                                if ! setfacl -d -m g:lndbackup:r "$subdir"; then
+                                    log_error "Failed to set default ACL on $subdir"
+                                    PERMISSION_SUCCESS=false
+                                fi
+                            fi
+                        done
+                    fi
+                fi
             else
                 if ! sudo chgrp -R lndbackup "$LND_DATA_DIR/data"; then
                     log_error "Failed to set group ownership on $LND_DATA_DIR/data (sudo required)"
@@ -367,6 +406,52 @@ if [[ "$NEEDS_PERMISSION_SETUP" == "true" ]]; then
                         fi
                     fi
                 done
+                
+                # Set up tapd permissions if enabled
+                if [[ "${ENABLE_TAPD:-false}" == "true" ]]; then
+                    TAPD_DATA_DIR="${TAPD_DATA_DIR:-$HOME/.tapd}"
+                    log_info "Setting up tapd permissions for $TAPD_DATA_DIR..."
+                    
+                    if [[ -d "$TAPD_DATA_DIR" ]]; then
+                        # Grant group access to tapd data directory
+                        if ! sudo chgrp -R lndbackup "$TAPD_DATA_DIR"; then
+                            log_error "Failed to set group ownership on $TAPD_DATA_DIR"
+                            PERMISSION_SUCCESS=false
+                        fi
+                        
+                        if ! sudo chmod -R g+rX "$TAPD_DATA_DIR"; then
+                            log_error "Failed to set group permissions on $TAPD_DATA_DIR"
+                            PERMISSION_SUCCESS=false
+                        fi
+                        
+                        # Set default ACL for new tapd files
+                        if ! sudo setfacl -d -m g:lndbackup:r "$TAPD_DATA_DIR"; then
+                            log_error "Failed to set default ACL on $TAPD_DATA_DIR"
+                            PERMISSION_SUCCESS=false
+                        fi
+                        
+                        # Set ACL on existing tapd database files
+                        for db_file in "$TAPD_DATA_DIR"/{tapd.db,tapd.db-wal,tapd.db-shm}; do
+                            if [[ -f "$db_file" ]]; then
+                                log_info "Setting ACL on existing $(basename "$db_file")"
+                                if ! sudo setfacl -m u:lndbackup:r "$db_file"; then
+                                    log_error "Failed to set ACL on $db_file"
+                                    PERMISSION_SUCCESS=false
+                                fi
+                            fi
+                        done
+                        
+                        # Handle tapd data subdirectories with proper permissions
+                        for subdir in "$TAPD_DATA_DIR"/*; do
+                            if [[ -d "$subdir" ]]; then
+                                if ! sudo setfacl -d -m g:lndbackup:r "$subdir"; then
+                                    log_error "Failed to set default ACL on $subdir"
+                                    PERMISSION_SUCCESS=false
+                                fi
+                            fi
+                        done
+                    fi
+                fi
             fi
 
             if [[ "$PERMISSION_SUCCESS" != "true" ]]; then
@@ -586,6 +671,39 @@ awk -v user_group="$USER_GROUP_SECTION" -v cred="$CREDENTIAL_SECTION" \
 # Clean up temp file
 rm -f "$SYSTEMD_DIR/lnd-backup.service.tmp"
 
+# Install Tapd backup service if enabled
+if [[ "${ENABLE_TAPD:-false}" == "true" ]]; then
+    log_info "Installing Tapd backup service..."
+    
+    # Copy tapd backup files
+    cp "$SCRIPT_DIR/tapd-backup-monitor.sh" "$INSTALL_DIR/tapd-backup-monitor"
+    cp "$SCRIPT_DIR/tapd_backup.py" "$INSTALL_DIR/tapd_backup.py"
+    chmod +x "$INSTALL_DIR/tapd-backup-monitor"
+    chmod +x "$INSTALL_DIR/tapd_backup.py"
+    
+    # Process wrapper script
+    sed -e "s|%INSTALL_DIR%|$INSTALL_DIR|g" \
+        -e "s|%VENV_DIR%|$VENV_DIR|g" \
+        "$SCRIPT_DIR/templates/tapd-backup-wrapper.sh" > "$INSTALL_DIR/tapd-backup-wrapper"
+    chmod +x "$INSTALL_DIR/tapd-backup-wrapper"
+    
+    # Process service file (same pattern as LND service)
+    sed -e "s|%NETWORK%|$NETWORK|g" \
+        -e "s|%INSTALL_DIR%|$INSTALL_DIR|g" \
+        -e "s|%CONFIG_DIR%|$CONFIG_DIR|g" \
+        -e "s|%TAPD_DATA_DIR%|${TAPD_DATA_DIR:-$HOME/.tapd}|g" \
+        -e "s|%WANTED_BY%|$WANTED_BY|g" \
+        "$SCRIPT_DIR/tapd-backup.service" > "$SYSTEMD_DIR/tapd-backup.service.tmp"
+    
+    # Handle multi-line replacements
+    awk -v user_group="$USER_GROUP_SECTION" -v cred="$CREDENTIAL_SECTION" \
+        '{gsub("%USER_GROUP_SECTION%", user_group); gsub("%CREDENTIAL_SECTION%", cred); print}' \
+        "$SYSTEMD_DIR/tapd-backup.service.tmp" > "$SYSTEMD_DIR/tapd-backup.service"
+    
+    rm -f "$SYSTEMD_DIR/tapd-backup.service.tmp"
+    log_info "Tapd backup service installed"
+fi
+
 # Process and install uninstall script
 sed -e "s|%SYSTEMD_SCOPE%|$SYSTEMD_SCOPE|g" \
     -e "s|%SYSTEMD_DIR%|$SYSTEMD_DIR|g" \
@@ -617,10 +735,24 @@ if [[ $SYSTEMD_SCOPE == "system" ]]; then
     echo "  sudo systemctl enable --now lnd-backup"
     echo "  sudo systemctl status lnd-backup"
     echo "  sudo journalctl -fu lnd-backup"
+    if [[ "${ENABLE_TAPD:-false}" == "true" ]]; then
+        echo ""
+        echo "Tapd backup service:"
+        echo "  sudo systemctl enable --now tapd-backup"
+        echo "  sudo systemctl status tapd-backup"
+        echo "  sudo journalctl -fu tapd-backup"
+    fi
 else
     echo "  systemctl --user enable --now lnd-backup"
     echo "  systemctl --user status lnd-backup"
     echo "  journalctl --user -fu lnd-backup"
+    if [[ "${ENABLE_TAPD:-false}" == "true" ]]; then
+        echo ""
+        echo "Tapd backup service:"
+        echo "  systemctl --user enable --now tapd-backup"
+        echo "  systemctl --user status tapd-backup"
+        echo "  journalctl --user -fu tapd-backup"
+    fi
 fi
 echo
 echo "Important notes:"

@@ -5,8 +5,6 @@ Backs up critical tapd database files that contain asset ownership data
 WARNING: Loss of these files means permanent loss of all Taproot Assets
 """
 
-import dropbox
-from dropbox.files import WriteMode
 import os
 import tarfile
 import tempfile
@@ -16,61 +14,50 @@ from pathlib import Path
 from dotenv import load_dotenv
 import time
 import hashlib
+import socket
+
+# Import unified storage system
+sys.path.append(os.path.dirname(__file__))
+from storage_providers import StorageProviderFactory
 
 # Load environment variables
 load_dotenv()
 
-def load_dropbox_token():
-    """Load Dropbox token from systemd credential or environment variable"""
-    # Try systemd credential first (preferred for production)
-    credentials_dir = os.getenv('CREDENTIALS_DIRECTORY')
-    if credentials_dir:
-        token_file = os.path.join(credentials_dir, 'dropbox-token')
-        try:
-            with open(token_file, 'r') as f:
-                token = f.read().strip()
-                if token and token != 'YOUR_TOKEN_HERE_REPLACE_ME':
-                    return token
-        except (FileNotFoundError, PermissionError):
-            pass
-    
-    # Fallback to environment variable (development/legacy)
-    token = os.getenv('DROPBOX_ACCESS_TOKEN')
-    if token and token != 'YOUR_TOKEN_HERE_REPLACE_ME':
-        return token
-    
-    return None
-
 # Configuration from environment
-DROPBOX_ACCESS_TOKEN = load_dropbox_token()
 TAPD_DATA_DIR = os.getenv('TAPD_DATA_DIR', '/home/ubuntu/volumes/.tapd/data/mainnet')
-DROPBOX_DIR = os.getenv('DROPBOX_BACKUP_DIR', '/lightning-backups')
-LOCAL_BACKUP_DIR = os.getenv('LOCAL_BACKUP_DIR', '/home/ubuntu/lnd-backups')
+BACKUP_DIR = os.getenv('BACKUP_DIR', '/lightning-backups')
+LOCAL_BACKUP_DIR = os.getenv('LOCAL_BACKUP_DIR', '/var/backup/lnd')
 KEEP_LAST_N = int(os.getenv('KEEP_LAST_N_BACKUPS', '30'))
 
-# System identifier for multi-node setups
-import socket
 SYSTEM_ID = os.getenv('SYSTEM_ID', '').strip() or socket.gethostname()
 
-def setup_dropbox_client():
-    """Initialize and verify Dropbox client"""
-    if not DROPBOX_ACCESS_TOKEN:
-        print("Error: DROPBOX_ACCESS_TOKEN not configured")
-        print("Please configure via systemd credential or .env file")
-        print("For systemd: store token in credential 'dropbox-token'")
-        print("For development: add DROPBOX_ACCESS_TOKEN to .env file")
-        return None
+def get_storage_provider():
+    """Get storage provider using same pattern as backup.py"""
+    connection_string = os.getenv('STORAGE_CONNECTION_STRING')
     
-    try:
-        dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
-        dbx.users_get_current_account()
-        return dbx
-    except dropbox.exceptions.AuthError:
-        print("Error: Invalid Dropbox access token")
-        return None
-    except Exception as e:
-        print(f"Error connecting to Dropbox: {e}")
-        return None
+    # Try to read from systemd credential file if env var not set
+    if not connection_string:
+        # Method 1: systemd LoadCredential (most secure)
+        credentials_dir = os.getenv('CREDENTIALS_DIRECTORY')
+        if credentials_dir:
+            storage_connection_file = os.path.join(credentials_dir, 'storage.connection')
+            if os.path.exists(storage_connection_file):
+                with open(storage_connection_file, 'r') as f:
+                    connection_string = f.read().strip()
+        
+        # Method 2: Direct file path (fallback for older systemd)
+        if not connection_string:
+            storage_file = os.getenv('STORAGE_CONNECTION_STRING_FILE')
+            if storage_file and os.path.exists(storage_file):
+                with open(storage_file, 'r') as f:
+                    connection_string = f.read().strip()
+    
+    if not connection_string:
+        raise ValueError("STORAGE_CONNECTION_STRING environment variable or credential file is required")
+    
+    # Parse and create storage provider
+    factory = StorageProviderFactory()
+    return factory.get_provider(connection_string)
 
 def get_tapd_files():
     """Get list of tapd database files to backup
@@ -161,28 +148,23 @@ def create_backup_archive(timestamp):
     
     return archive_path, checksums
 
-def cleanup_old_backups(dbx, prefix="tapd-backup-"):
-    """Remove old tapd backups from Dropbox"""
+def cleanup_old_backups(storage_provider, prefix="tapd-backup-"):
+    """Remove old tapd backups from storage"""
     try:
-        result = dbx.files_list_folder(f"{DROPBOX_DIR}/{SYSTEM_ID}")
-        
-        # Filter for tapd backup files
-        backups = [
-            entry for entry in result.entries 
-            if entry.name.startswith(prefix) and entry.name.endswith('.tar.gz')
-        ]
+        system_dir = f"{BACKUP_DIR}/{SYSTEM_ID}"
+        backups = storage_provider.list_files(system_dir, prefix=prefix, suffix=".tar.gz")
         
         # Sort by modification time (newest first)
-        backups.sort(key=lambda x: x.server_modified, reverse=True)
+        backups.sort(key=lambda x: x.get('modified', ''), reverse=True)
         
         # Delete old backups
         if len(backups) > KEEP_LAST_N:
             for backup in backups[KEEP_LAST_N:]:
                 try:
-                    dbx.files_delete_v2(backup.path_lower)
-                    print(f"Deleted old backup: {backup.name}")
+                    storage_provider.delete_file(backup['path'])
+                    print(f"Deleted old backup: {backup['name']}")
                 except Exception as e:
-                    print(f"Warning: Could not delete {backup.name}: {e}")
+                    print(f"Warning: Could not delete {backup['name']}: {e}")
         
         return len(backups)
     
@@ -223,88 +205,52 @@ def local_backup(archive_path, timestamp):
         print(f"Warning: Local backup failed: {e}")
         return False
 
-def upload_to_dropbox(archive_path, timestamp, checksums, max_retries=3):
-    """Upload tapd backup archive to Dropbox with retry logic"""
+def upload_to_storage(archive_path, timestamp, checksums, max_retries=3):
+    """Upload tapd backup archive to storage with retry logic"""
     
-    dbx = setup_dropbox_client()
-    if not dbx:
+    try:
+        storage_provider = get_storage_provider()
+    except Exception as e:
+        print(f"Error: {e}")
         return False
     
     # Read archive file
     with open(archive_path, 'rb') as f:
         archive_contents = f.read()
     
-    # First, create local backup (always do this, even if Dropbox fails)
+    # First, create local backup (always do this, even if cloud storage fails)
     local_backup(archive_path, timestamp)
     
     for attempt in range(max_retries):
         try:
-            # Generate Dropbox paths with system identifier
-            system_dir = f"{DROPBOX_DIR}/{SYSTEM_ID}"
+            # Generate storage paths with system identifier
+            system_dir = f"{BACKUP_DIR}/{SYSTEM_ID}"
             timestamped_path = f"{system_dir}/tapd-backup-{timestamp}.tar.gz"
             latest_path = f"{system_dir}/tapd-latest.tar.gz"
             checksum_path = f"{system_dir}/tapd-backup-{timestamp}.checksums"
             
-            # Create backup directories if they don't exist
-            try:
-                dbx.files_get_metadata(DROPBOX_DIR)
-            except:
-                dbx.files_create_folder_v2(DROPBOX_DIR)
-                print(f"Created Dropbox folder: {DROPBOX_DIR}")
-            
-            try:
-                dbx.files_get_metadata(system_dir)
-            except:
-                dbx.files_create_folder_v2(system_dir)
-                print(f"Created system folder: {system_dir}")
-            
             # Upload timestamped backup
             print(f"Uploading backup to {timestamped_path}...")
-            dbx.files_upload(
-                archive_contents,
-                timestamped_path,
-                mode=WriteMode('overwrite'),
-                autorename=True
-            )
+            storage_provider.upload_file(archive_contents, timestamped_path)
             
             # Upload checksums file
             checksum_content = "\n".join([f"{fname}: {checksum}" for fname, checksum in checksums.items()])
-            dbx.files_upload(
-                checksum_content.encode(),
-                checksum_path,
-                mode=WriteMode('overwrite')
-            )
+            storage_provider.upload_file(checksum_content.encode(), checksum_path)
             
             # Also upload as latest version
             print(f"Updating latest backup at {latest_path}...")
-            dbx.files_upload(
-                archive_contents,
-                latest_path,
-                mode=WriteMode('overwrite')
-            )
+            storage_provider.upload_file(archive_contents, latest_path)
             
             # Get file size for logging
             file_size = len(archive_contents)
             print(f"Backup successful: {file_size} bytes at {datetime.now()}")
             
             # Cleanup old backups
-            total_backups = cleanup_old_backups(dbx)
+            total_backups = cleanup_old_backups(storage_provider)
             print(f"Total tapd backups maintained: {min(total_backups, KEEP_LAST_N)}")
             
             return True
             
-        except dropbox.exceptions.ApiError as e:
-            if e.error.is_path() and e.error.get_path().is_insufficient_space():
-                print("Error: Insufficient space in Dropbox")
-                return False
-            else:
-                print(f"Dropbox API error (attempt {attempt + 1}/{max_retries}): {e}")
-                if attempt < max_retries - 1:
-                    wait_time = 2 ** attempt
-                    print(f"Retrying in {wait_time} seconds...")
-                    time.sleep(wait_time)
-                else:
-                    return False
         except Exception as e:
             print(f"Error during backup (attempt {attempt + 1}/{max_retries}): {e}")
             if attempt < max_retries - 1:
@@ -345,8 +291,8 @@ def main():
         return 1
     
     try:
-        # Upload to Dropbox
-        success = upload_to_dropbox(archive_path, timestamp, checksums)
+        # Upload to storage
+        success = upload_to_storage(archive_path, timestamp, checksums)
         
         # Clean up temporary archive
         if archive_path.exists():
