@@ -378,7 +378,7 @@ if [[ "$SETUP_PERMISSIONS" == "true" ]]; then
                         # Handle tapd data subdirectories with proper permissions
                         for subdir in "$TAPD_DATA_DIR"/*; do
                             if [[ -d "$subdir" ]]; then
-                                if ! setfacl -d -m g:lndbackup:r "$subdir"; then
+                                if ! setfacl -d -m g:lndbackup:rx "$subdir"; then
                                     log_error "Failed to set default ACL on $subdir"
                                     PERMISSION_SUCCESS=false
                                 fi
