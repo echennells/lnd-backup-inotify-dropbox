@@ -65,7 +65,10 @@ fi
 
 # Detect LND configuration
 detect_lnd_config() {
-    local lnd_dir="${LND_DATA_DIR:-$HOME/.lnd}"
+    # Use actual user's home directory, not root's when run with sudo
+    local actual_home="${SUDO_USER:+$(eval echo ~$SUDO_USER)}"
+    actual_home="${actual_home:-$HOME}"
+    local lnd_dir="${LND_DATA_DIR:-$actual_home/volumes/.lnd}"
     local lnd_conf="$lnd_dir/lnd.conf"
     local network="mainnet"
     
@@ -86,7 +89,10 @@ detect_lnd_config() {
 
 # Get channel.backup path based on network
 get_backup_path() {
-    local lnd_dir="${LND_DATA_DIR:-$HOME/.lnd}"
+    # Use actual user's home directory, not root's when run with sudo
+    local actual_home="${SUDO_USER:+$(eval echo ~$SUDO_USER)}"
+    actual_home="${actual_home:-$HOME}"
+    local lnd_dir="${LND_DATA_DIR:-$actual_home/volumes/.lnd}"
     local network="$1"
     
     case "$network" in
@@ -159,7 +165,10 @@ else
     NETWORK=$(detect_lnd_config)
 fi
 BACKUP_PATH=$(get_backup_path "$NETWORK")
-LND_DATA_DIR="${LND_DATA_DIR:-$HOME/.lnd}"
+# Use actual user's home directory, not root's when run with sudo
+ACTUAL_HOME="${SUDO_USER:+$(eval echo ~$SUDO_USER)}"
+ACTUAL_HOME="${ACTUAL_HOME:-$HOME}"
+LND_DATA_DIR="${LND_DATA_DIR:-$ACTUAL_HOME/volumes/.lnd}"
 
 log_info "Detected network: $NETWORK"
 log_info "Channel backup path: $BACKUP_PATH"
@@ -330,7 +339,7 @@ if [[ "$SETUP_PERMISSIONS" == "true" ]]; then
                 
                 # Set up tapd permissions if enabled (root mode)
                 if [[ "${ENABLE_TAPD:-false}" == "true" ]]; then
-                    TAPD_DATA_DIR="${TAPD_DATA_DIR:-$HOME/.tapd}"
+                    TAPD_DATA_DIR="${TAPD_DATA_DIR:-$ACTUAL_HOME/volumes/.tapd/data/mainnet}"
                     log_info "Setting up tapd permissions for $TAPD_DATA_DIR..."
                     
                     if [[ -d "$TAPD_DATA_DIR" ]]; then
@@ -531,7 +540,7 @@ sed -e "s|%NETWORK%|$NETWORK|g" \
     -e "s|%LND_DATA_DIR%|$LND_DATA_DIR|g" \
     -e "s|%CHANNEL_BACKUP_PATH%|$BACKUP_PATH|g" \
     -e "s|%CHECK_INTERVAL%|${CHECK_INTERVAL:-300}|g" \
-    -e "s|%TAPD_DATA_DIR%|${TAPD_DATA_DIR:-$HOME/.tapd}|g" \
+    -e "s|%TAPD_DATA_DIR%|${TAPD_DATA_DIR:-$ACTUAL_HOME/volumes/.tapd/data/mainnet}|g" \
     -e "s|%ENABLE_TAPD%|${ENABLE_TAPD:-false}|g" \
     -e "s|%LOG_LEVEL%|${LOG_LEVEL:-info}|g" \
     "$SCRIPT_DIR/templates/config" > "$CONFIG_DIR/config"
@@ -597,7 +606,7 @@ if [[ "${ENABLE_TAPD:-false}" == "true" ]]; then
     sed -e "s|%NETWORK%|$NETWORK|g" \
         -e "s|%INSTALL_DIR%|$INSTALL_DIR|g" \
         -e "s|%CONFIG_DIR%|$CONFIG_DIR|g" \
-        -e "s|%TAPD_DATA_DIR%|${TAPD_DATA_DIR:-$HOME/.tapd}|g" \
+        -e "s|%TAPD_DATA_DIR%|${TAPD_DATA_DIR:-$ACTUAL_HOME/volumes/.tapd/data/mainnet}|g" \
         -e "s|%WANTED_BY%|$WANTED_BY|g" \
         "$SCRIPT_DIR/tapd-backup.service" > "$SYSTEMD_DIR/tapd-backup.service.tmp"
     
