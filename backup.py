@@ -17,7 +17,7 @@ import azure_provider
 load_dotenv()
 
 # Configuration from environment
-LOCAL_FILE = os.getenv('LND_CHANNEL_BACKUP_PATH', os.path.expanduser('~/volumes/.lnd/data/chain/bitcoin/mainnet/channel.backup'))
+LOCAL_FILE = os.getenv('LND_CHANNEL_BACKUP_PATH', '/home/ubuntu/volumes/.lnd/data/chain/bitcoin/mainnet/channel.backup')
 SYSTEM_ID = os.getenv('SYSTEM_ID', '').strip() or socket.gethostname()
 
 def get_storage_config() -> dict:

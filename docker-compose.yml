@@ -29,7 +29,7 @@ services:
     
     volumes:
       # Mount LND data directory (read-only) - using actual path
-      - "${LND_HOST_DATA_DIR:-$HOME/volumes/.lnd}:/lnd:ro"
+      - "/home/ubuntu/volumes/.lnd:/lnd:ro"
       
       # Local backup directory (maps to host system)
       - "${LOCAL_BACKUP_DIR:-./local-backups}:/var/backup/lnd"
