@@ -4,10 +4,12 @@
 # Implements checksum verification to ensure file stability before backup
 
 # Load environment variables
-export $(grep -v '^#' /home/ubuntu/lnd-backup-inotify-dropbox/.env | xargs)
+# Get script directory and load environment
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export $(grep -v '^#' "$SCRIPT_DIR/.env" | xargs)
 
 # Set default if not in env
-BACKUP_FILE="${LND_CHANNEL_BACKUP_PATH:-/home/ubuntu/volumes/.lnd/data/chain/bitcoin/signet/channel.backup}"
+BACKUP_FILE="${LND_CHANNEL_BACKUP_PATH:-$HOME/volumes/.lnd/data/chain/bitcoin/signet/channel.backup}"
 STAGING_DIR="/tmp/lnd-backup-staging"
 
 # Create staging directory
@@ -75,7 +77,7 @@ perform_backup() {
         export STAGED_BACKUP_FILE="$staging_file"
         
         # Trigger the backup with staged file
-        BACKUP_SCRIPT="/home/ubuntu/lnd-backup-inotify-dropbox/venv/bin/python3 /home/ubuntu/lnd-backup-inotify-dropbox/dropbox_backup.py"
+        BACKUP_SCRIPT="$SCRIPT_DIR/venv/bin/python3 $SCRIPT_DIR/dropbox_backup.py"
         $BACKUP_SCRIPT
         
         if [ $? -eq 0 ]; then

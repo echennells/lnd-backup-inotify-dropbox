@@ -1,4 +1,4 @@
-#!/home/ubuntu/lnd-backup-inotify-dropbox/venv/bin/python3
+#!/usr/bin/env python3
 """
 Taproot Assets daemon backup script
 Backs up critical tapd database files that contain asset ownership data
@@ -25,7 +25,7 @@ import azure_provider
 load_dotenv()
 
 # Configuration from environment
-TAPD_DATA_DIR = os.getenv('TAPD_DATA_DIR', '/home/ubuntu/volumes/.tapd/data/mainnet')
+TAPD_DATA_DIR = os.getenv('TAPD_DATA_DIR', os.path.expanduser('~/volumes/.tapd/data/mainnet'))
 BACKUP_DIR = os.getenv('BACKUP_DIR', '/lightning-backups')
 LOCAL_BACKUP_DIR = os.getenv('LOCAL_BACKUP_DIR', '/var/backup/lnd')
 KEEP_LAST_N = int(os.getenv('KEEP_LAST_N_BACKUPS', '30'))

@@ -12,7 +12,7 @@ if [ -f "${CONFIG_DIR}/config" ]; then
 fi
 
 # Default configuration
-TAPD_DATA_DIR="${TAPD_DATA_DIR:-/home/ubuntu/volumes/.tapd/data/mainnet}"
+TAPD_DATA_DIR="${TAPD_DATA_DIR:-$HOME/volumes/.tapd/data/mainnet}"
 STAGING_DIR="${STAGING_DIR:-/tmp/tapd-backup-staging}"
 CHECK_INTERVAL="${CHECK_INTERVAL:-300}"
 LOG_LEVEL="${LOG_LEVEL:-info}"
